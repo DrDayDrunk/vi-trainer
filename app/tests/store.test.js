@@ -1,0 +1,79 @@
+// Needs the test-only helper fake-indexeddb (npm install). Skipped, not failed, when it is not installed.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+let ready = true;
+try { await import('fake-indexeddb/auto'); } catch { ready = false; }
+const { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck } = await import('../store.js');
+const opts = { skip: !ready && 'fake-indexeddb not installed' };
+
+const gone = () => new Promise(ok => { const r = indexedDB.deleteDatabase('vitrainer'); r.onsuccess = r.onerror = r.onblocked = ok; });
+const sentence = n => ({ number: n, level: 1, track: 1, en_text: 'e' + n, vi_text: 'v' + n, en_audio: new ArrayBuffer(8), vi_audio: new ArrayBuffer(8) });
+// Puts progress straight into storage (the way a restore from a backup will later), bypassing the one-card-at-a-time guard.
+const seed = (db, deck) => new Promise(ok => { const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put(deck, 'deck'); tx.oncomplete = ok; });
+const deckOf = n => ({ cards: Object.fromEntries(Array.from({ length: n }, (_, i) => [i + 1, { state: 2, due: '2026-11-01T09:00:00.000Z' }])), last: null });
+
+test('a first-time phone has an empty deck', opts, async () => {
+  await gone(); const db = await openDb();
+  assert.deepEqual(await loadDeck(db), { cards: {}, last: null });
+  db.close();
+});
+
+test('a saved deck comes back exactly, including the undo information', opts, async () => {
+  await gone(); const db = await openDb();
+  const d = { ...deckOf(1), last: { n: 1, prev: null } };
+  await saveDeck(db, d); db.close();
+  const again = await openDb();                                 // reopened, as after closing the app
+  assert.deepEqual(await loadDeck(again), d);
+  again.close();
+});
+
+test('upgrading the storage keeps sentences that were already imported', opts, async () => {
+  await gone();
+  const v1 = await new Promise((ok, no) => {                    // the storage exactly as stage 1 made it
+    const r = indexedDB.open('vitrainer', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('sentences', { keyPath: 'number' });
+    r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error);
+  });
+  await new Promise(ok => { const tx = v1.transaction('sentences', 'readwrite'); [1, 2, 3].forEach(n => tx.objectStore('sentences').put(sentence(n))); tx.oncomplete = ok; });
+  v1.close();
+  const db = await openDb();
+  assert.deepEqual(await allNumbers(db), [1, 2, 3]);
+  assert.equal((await getSentence(db, 2)).vi_text, 'v2');
+  assert.deepEqual(await loadDeck(db), { cards: {}, last: null });
+  db.close();
+});
+
+test('importing sentences never touches saved progress', opts, async () => {
+  await gone(); const db = await openDb();
+  await seed(db, deckOf(5));
+  await savePack(db, [1, 2, 3].map(sentence));
+  assert.equal(Object.keys((await loadDeck(db)).cards).length, 5);
+  db.close();
+});
+
+test('saving a deck that suddenly has far fewer cards is refused and the old one stays', opts, async () => {
+  await gone(); const db = await openDb();
+  await seed(db, deckOf(5));
+  await assert.rejects(saveDeck(db, { cards: {}, last: null }));
+  await assert.rejects(saveDeck(db, deckOf(3)));
+  assert.equal(Object.keys((await loadDeck(db)).cards).length, 5);
+  await saveDeck(db, deckOf(4));                                // one card fewer is an undo: allowed
+  await saveDeck(db, deckOf(5));
+  db.close();
+});
+
+test('saving one new card at a time works, the way studying grows a deck', opts, async () => {
+  await gone(); const db = await openDb();
+  for (const n of [1, 2, 3]) await saveDeck(db, deckOf(n));
+  assert.equal(Object.keys((await loadDeck(db)).cards).length, 3);
+  await assert.rejects(saveDeck(db, deckOf(6)));                // jumping by three is refused
+  db.close();
+});
+
+test('progress that cannot be read is refused, never replaced by an empty deck', opts, async () => {
+  await gone(); const db = await openDb();
+  await new Promise(ok => { const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put('garbage', 'deck'); tx.oncomplete = ok; });
+  await assert.rejects(loadDeck(db), /could not be read/);
+  db.close();
+});

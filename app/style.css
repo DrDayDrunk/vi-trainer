@@ -6,6 +6,7 @@
 :root{color-scheme:light dark;--bg:#F8FAFC;--card:#FFFFFF;--fg:#0F172A;--muted:#475569;--primary:#0F766E;--on-primary:#FFFFFF;--edge:#6B7A8F;--line:#E2E8F0;--error:#B91C1C}
 @media (prefers-color-scheme:dark){:root{--bg:#0F172A;--card:#1E293B;--fg:#F8FAFC;--muted:#CBD5E1;--primary:#2DD4BF;--on-primary:#042F2E;--edge:#64748B;--line:#334155;--error:#FCA5A5}}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:1rem/1.5 'Be Vietnam Pro',-apple-system,system-ui,sans-serif;
   padding:max(1rem,env(safe-area-inset-top)) max(1rem,env(safe-area-inset-right)) max(1.5rem,env(safe-area-inset-bottom)) max(1rem,env(safe-area-inset-left))}
@@ -19,15 +20,27 @@ h2{font-size:1rem;font-weight:600;margin:0 0 .5rem;color:var(--muted)}
 .counts dt{font-size:.875rem;color:var(--muted)}
 .counts dd{margin:0;font-size:1.5rem;font-weight:600}
 #vi{font-size:clamp(1.75rem,7vw,2.5rem);font-weight:600;line-height:1.35;margin:.25rem 0 .5rem}
-#en{font-size:1.125rem;margin:0 0 1rem}
+#en{font-size:1.5rem;font-weight:600;line-height:1.4;margin:.25rem 0 1rem}
+#review.revealed #en{font-size:1.125rem;font-weight:400;color:var(--muted)}
+#review{display:flex;flex-direction:column;min-height:calc(100dvh - 2.5rem)}
+#review .card{margin-bottom:.75rem}
+.top{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.75rem}
+.top p{margin:0;font-size:.875rem}
+.meta{margin:0;font-size:.875rem}
+.bar{margin-top:auto;position:sticky;bottom:0;background:var(--bg);padding-top:.5rem}
+.bar button{width:100%;margin-bottom:.5rem}
+.grades{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.5rem}
+.grades button{flex-direction:column;gap:0;min-height:60px;padding:0 .25rem;margin:0}
+.grades small{font-size:.875rem;font-weight:400;color:var(--muted)}
+#rmsg{min-height:1.5rem;margin:0 0 .25rem;font-size:.875rem}
+#rmsg.error,#msg.error{color:var(--error)}
 .row{display:flex;gap:.5rem;margin-bottom:.5rem}
 .row button{flex:1}
 button{font:inherit;font-weight:600;min-height:48px;padding:0 1rem;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:.5rem;cursor:pointer}
 button.main{width:100%;background:var(--primary);color:var(--on-primary);border:0}
 button.quiet{background:transparent;color:var(--fg);border:1px solid var(--edge)}
 button:disabled{opacity:.55;cursor:default}
-button.main + button{margin-top:.5rem;width:100%}
+#home .actions button + button{margin-top:.5rem;width:100%}
 button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 #msg{min-height:1.5rem;margin:.75rem 0 0}
-#msg.error{color:var(--error)}
 @media (prefers-reduced-motion:no-preference){button{transition:opacity .15s}}

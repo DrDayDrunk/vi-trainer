@@ -1,3 +1,4 @@
 {
-  "type": "module"
+  "type": "module",
+  "devDependencies": { "fake-indexeddb": "^6" }
 }
