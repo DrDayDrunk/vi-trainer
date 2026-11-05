@@ -9,7 +9,7 @@ const loaded = new Set();
 for (const m of read('index.html').matchAll(/(?:src|href)="([^"#]+)"/g)) if (!/^https?:/.test(m[1])) loaded.add(m[1]);
 for (const m of read('style.css').matchAll(/url\(([^)]+)\)/g)) loaded.add(m[1]);
 for (const f of ['app.js']) for (const m of read(f).matchAll(/from '\.\/([^']+)'/g)) loaded.add(m[1]);
-for (const f of ['engine.js', 'pack.js', 'store.js']) for (const m of read(f).matchAll(/from '\.\/([^']+)'/g)) loaded.add(m[1]);
+for (const f of ['engine.js', 'pack.js', 'store.js', 'backup.js']) for (const m of read(f).matchAll(/from '\.\/([^']+)'/g)) loaded.add(m[1]);
 
 test('every file the page loads is saved for offline use', () => {
   assert.deepEqual([...loaded].filter(f => !listed.includes(f)), []);
@@ -18,6 +18,6 @@ test('every file in the offline list exists', () => {
   assert.deepEqual(listed.filter(f => !existsSync(new URL('../' + f, import.meta.url))), []);
 });
 test('the app loads nothing from the internet', () => {
-  for (const f of ['index.html', 'style.css', 'app.js', 'sw.js', 'engine.js', 'pack.js', 'store.js'])
+  for (const f of ['index.html', 'style.css', 'app.js', 'sw.js', 'engine.js', 'pack.js', 'store.js', 'backup.js'])
     assert.doesNotMatch(read(f), /https?:\/\/(?!www\.w3\.org)/, f);
 });

@@ -1,5 +1,6 @@
 // Storage on the phone (IndexedDB). Sentences and card progress live in separate stores,
 // so importing sentences can never touch progress.
+import { refusal, DEFAULT_DAYS } from './backup.js';
 const wrap = req => new Promise((ok, no) => { req.onsuccess = () => ok(req.result); req.onerror = () => no(req.error); });
 const finished = tx => new Promise((ok, no) => { tx.oncomplete = ok; tx.onerror = tx.onabort = () => no(tx.error || new Error('Storage failed.')); });
 
@@ -42,5 +43,39 @@ export function saveDeck(db, deck) {
     };
     tx.oncomplete = ok;
     tx.onabort = tx.onerror = () => no(tx.error || new Error('Saving progress failed.'));
+  });
+}
+
+// Settings (not progress). Anything missing or unreadable falls back to the defaults.
+export async function loadSettings(db) {
+  const s = await wrap(db.transaction('meta').objectStore('meta').get('settings'));
+  const ok = s && typeof s === 'object' && !Array.isArray(s);
+  return { backupDays: ok && s.backupDays || DEFAULT_DAYS, lastBackup: ok && s.lastBackup || null };
+}
+export async function saveSettings(db, settings) {
+  const tx = db.transaction('meta', 'readwrite');
+  tx.objectStore('meta').put(settings, 'settings');
+  await finished(tx);
+}
+
+// Restore a whole deck from a backup that has already been validated. The rules are checked again here, inside the
+// same transaction that writes, against what is really stored: an empty, smaller or older backup is refused, and
+// progress that cannot be read is never replaced. Cards and settings are written together or not at all.
+export function replaceDeck(db, cards, backupDays, now) {
+  return new Promise((ok, no) => {
+    const tx = db.transaction('meta', 'readwrite'), store = tx.objectStore('meta'), d = store.get('deck'), s = store.get('settings');
+    const stop = e => { tx.abort(); no(e); };
+    tx.oncomplete = ok;
+    tx.onabort = tx.onerror = () => no(tx.error || new Error('Restoring failed. Nothing was changed.'));
+    s.onsuccess = () => {      // requests finish in order, so the deck has been read by now
+      let why = null;
+      if (d.result !== undefined && (!d.result || typeof d.result !== 'object' || !d.result.cards || typeof d.result.cards !== 'object' || Array.isArray(d.result.cards)))
+        why = 'Your saved progress could not be read, so it was not replaced. Nothing was changed.';
+      else why = refusal(d.result ? d.result.cards : {}, cards);
+      if (why) return stop(new Error(why));
+      const old = s.result && typeof s.result === 'object' ? s.result : {};
+      store.put({ cards, last: null }, 'deck');
+      store.put({ ...old, backupDays: backupDays || old.backupDays || DEFAULT_DAYS, lastBackup: now.toISOString() }, 'settings');
+    };
   });
 }

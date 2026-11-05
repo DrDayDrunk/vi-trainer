@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 
 let ready = true;
 try { await import('fake-indexeddb/auto'); } catch { ready = false; }
-const { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck } = await import('../store.js');
+const { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck, replaceDeck, loadSettings, saveSettings } = await import('../store.js');
+const { realDeck, E } = await import('./helpers.js');
 const opts = { skip: !ready && 'fake-indexeddb not installed' };
 
 const gone = () => new Promise(ok => { const r = indexedDB.deleteDatabase('vitrainer'); r.onsuccess = r.onerror = r.onblocked = ok; });
@@ -75,5 +76,73 @@ test('progress that cannot be read is refused, never replaced by an empty deck',
   await gone(); const db = await openDb();
   await new Promise(ok => { const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put('garbage', 'deck'); tx.oncomplete = ok; });
   await assert.rejects(loadDeck(db), /could not be read/);
+  db.close();
+});
+
+// ---- restoring a whole deck from a backup (ticket 08)
+const NOW = new Date(2026, 10, 3, 14, 5);
+const one = d => E.review({ cards: {}, last: null }, 1, 3, new Date(2026, 10, d, 10)).cards;
+
+test('settings start at their defaults and come back as saved', opts, async () => {
+  await gone(); const db = await openDb();
+  assert.deepEqual(await loadSettings(db), { backupDays: 7, lastBackup: null });
+  await saveSettings(db, { backupDays: 14, lastBackup: NOW.toISOString() });
+  assert.deepEqual(await loadSettings(db), { backupDays: 14, lastBackup: NOW.toISOString() });
+  db.close();
+});
+
+test('wipe test: the progress of a wiped phone comes back from the backup with every card and due time the same', opts, async () => {
+  await gone(); let db = await openDb();
+  const d = realDeck();
+  for (let n = 1; n <= 5; n++) await saveDeck(db, { cards: Object.fromEntries(Object.entries(d.cards).filter(([k]) => +k <= n)), last: null });
+  const before = await loadDeck(db); db.close();
+  await gone(); db = await openDb();                            // the wipe
+  assert.deepEqual(await loadDeck(db), { cards: {}, last: null });
+  await replaceDeck(db, before.cards, 14, NOW);
+  const after = await loadDeck(db);
+  assert.deepEqual(after.cards, d.cards);                       // same state and same due time, card by card
+  assert.equal(after.last, null);                               // undo information is not restored
+  assert.deepEqual(await loadSettings(db), { backupDays: 14, lastBackup: NOW.toISOString() });
+  db.close();
+});
+
+test('restoring leaves the imported sentences alone, whichever came first', opts, async () => {
+  await gone(); const db = await openDb();
+  await savePack(db, [1, 2, 3].map(sentence));
+  await replaceDeck(db, one(3), undefined, NOW);
+  assert.deepEqual(await allNumbers(db), [1, 2, 3]);
+  assert.equal(Object.keys((await loadDeck(db)).cards).length, 1);
+  assert.equal((await loadSettings(db)).backupDays, 7);        // a backup with no settings keeps the phone's
+  db.close();
+});
+
+test('a restore that would lose progress is refused inside storage and nothing changes', opts, async () => {
+  await gone(); const db = await openDb();
+  const mine = realDeck(); await seed(db, mine);
+  await saveSettings(db, { backupDays: 3, lastBackup: null });
+  const fewer = { 1: mine.cards[1] }, empty = {};
+  const older = Object.fromEntries(Object.entries(mine.cards).map(([k, c]) => [k, { ...c, last_review: '2026-10-01T10:00:00.000Z' }]));
+  for (const bad of [empty, fewer, older]) {
+    await assert.rejects(replaceDeck(db, bad, 30, NOW), /Nothing was changed/);
+    assert.deepEqual(await loadDeck(db), mine);
+    assert.deepEqual(await loadSettings(db), { backupDays: 3, lastBackup: null });
+  }
+  db.close();
+});
+
+test('a restore with more cards and newer reviews replaces the deck in one step', opts, async () => {
+  await gone(); const db = await openDb();
+  await seed(db, { cards: one(1), last: { n: 1, prev: null } });
+  const bigger = realDeck().cards;
+  await replaceDeck(db, bigger, 30, NOW);
+  assert.deepEqual(await loadDeck(db), { cards: bigger, last: null });
+  db.close();
+});
+
+test('a restore never goes over progress that cannot be read', opts, async () => {
+  await gone(); const db = await openDb();
+  await new Promise(ok => { const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put('garbage', 'deck'); tx.oncomplete = ok; });
+  await assert.rejects(replaceDeck(db, one(3), 7, NOW), /could not be read/);
+  await assert.rejects(loadDeck(db), /could not be read/);      // still there, untouched
   db.close();
 });

@@ -44,3 +44,12 @@ button:disabled{opacity:.55;cursor:default}
 button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 #msg{min-height:1.5rem;margin:.75rem 0 0}
 @media (prefers-reduced-motion:no-preference){button{transition:opacity .15s}}
+#backup #bk-msg1,#backup #bk-msg2{min-height:1.5rem;margin:.75rem 0 0;font-size:.875rem}
+#bk-msg1.error,#bk-msg2.error{color:var(--error)}
+#backup .top{justify-content:flex-start}
+#backup p{margin:0 0 .75rem}
+#backup label{display:block;margin-bottom:.5rem}
+#bk-confirm .row{margin:.5rem 0 0}
+#nudge p{margin:0 0 .75rem}
+select{font:inherit;width:100%;min-height:48px;padding:0 .75rem;border-radius:12px;border:1px solid var(--edge);background:var(--card);color:var(--fg)}
+select:focus-visible{outline:2px solid var(--primary);outline-offset:2px}

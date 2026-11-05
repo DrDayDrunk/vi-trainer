@@ -27,11 +27,58 @@
     </dl>
   </section>
 
+  <section id="nudge" class="card" hidden>
+    <p id="nudge-text"></p>
+    <button id="nudge-go" class="quiet">Back up now</button>
+  </section>
+
   <section class="actions">
     <button id="study" class="main" disabled>Start studying</button>
     <button id="pick" class="quiet">Import sentences</button>
+    <button id="to-backup" class="quiet">Backup</button>
     <input id="file" type="file" accept=".json,application/json" hidden>
     <p id="msg" role="status" aria-live="polite"></p>
+  </section>
+</main>
+
+<main id="backup" hidden>
+  <div class="top">
+    <button id="bk-back" class="quiet"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Home</button>
+  </div>
+  <h1>Backup</h1>
+
+  <section class="card" aria-labelledby="h-save">
+    <h2 id="h-save">Save a backup</h2>
+    <p id="bk-last" class="muted"></p>
+    <p class="muted">Your card progress and settings go into one small file. Choose Save to Files when the sheet opens. The sentences are not included; they can be imported again.</p>
+    <button id="bk-export" class="main">Save backup</button>
+    <p id="bk-msg1" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-restore">
+    <h2 id="h-restore">Restore from a backup</h2>
+    <p class="muted">Choose a backup file from Files. It will never replace progress with a smaller or older backup.</p>
+    <button id="bk-pick" class="quiet">Choose backup file</button>
+    <input id="bk-file" type="file" accept=".json,application/json,text/plain" hidden>
+    <p id="bk-msg2" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="bk-confirm" class="card" aria-labelledby="h-confirm" hidden>
+    <h2 id="h-confirm">Replace the progress on this phone?</h2>
+    <p id="cmp-b"></p>
+    <p id="cmp-p"></p>
+    <div class="row">
+      <button id="bk-yes" class="main">Replace progress</button>
+      <button id="bk-no" class="quiet">Cancel</button>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-remind">
+    <h2 id="h-remind">Reminder</h2>
+    <label for="bk-days">Remind me when my last backup is this old</label>
+    <select id="bk-days">
+      <option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option>
+    </select>
   </section>
 </main>
 
