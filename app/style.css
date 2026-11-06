@@ -53,3 +53,14 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 #nudge p{margin:0 0 .75rem}
 select{font:inherit;width:100%;min-height:48px;padding:0 .75rem;border-radius:12px;border:1px solid var(--edge);background:var(--card);color:var(--fg)}
 select:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+#along{display:flex;flex-direction:column;min-height:calc(100dvh - 2.5rem)}
+#along .card{margin-bottom:.75rem}
+#a-vi{font-size:clamp(1.75rem,7vw,2.5rem);font-weight:600;line-height:1.35;margin:.25rem 0 .5rem}
+#a-en{font-size:1.125rem;color:var(--muted);margin:0}
+#a-msg{min-height:1.5rem;margin:0 0 .25rem;font-size:.875rem}
+#a-msg.error{color:var(--error)}
+#along .row>div{flex:1;min-width:0}
+#along .card .row{margin-bottom:0}
+#along label{display:block;margin-bottom:.25rem;font-size:.875rem;color:var(--muted)}
+.bar .row{margin-bottom:.5rem}
+.bar .row button{width:auto;margin:0}

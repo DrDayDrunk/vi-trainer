@@ -74,5 +74,8 @@ export function createEngine(FSRS, { retention = 0.9 } = {}) {
     };
   }
 
-  return { preview, review, undo, next, counts };
+  // Read-along set: the next `size` sentences on the phone that have no card yet, in course order. Read-only.
+  const readAlong = (deck, pack, size = 10) => [...pack].sort((a, b) => a - b).filter(n => !(n in deck.cards)).slice(0, size);
+
+  return { preview, review, undo, next, counts, readAlong };
 }

@@ -34,6 +34,7 @@
 
   <section class="actions">
     <button id="study" class="main" disabled>Start studying</button>
+    <button id="to-along" class="quiet" disabled>Read along</button>
     <button id="pick" class="quiet">Import sentences</button>
     <button id="to-backup" class="quiet">Backup</button>
     <input id="file" type="file" accept=".json,application/json" hidden>
@@ -109,6 +110,39 @@
       <button class="quiet grade" data-g="4">Easy<small id="t4"></small></button>
     </div>
     <button id="undo" class="quiet" disabled>Undo last grade</button>
+  </div>
+</main>
+<main id="along" hidden>
+  <div class="top">
+    <button id="a-back" class="quiet"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Home</button>
+    <p id="a-pos" class="muted"></p>
+  </div>
+
+  <section class="card">
+    <p id="a-num" class="meta muted"></p>
+    <p id="a-vi" lang="vi"></p>
+    <p id="a-en" lang="en"></p>
+  </section>
+
+  <section class="card" aria-label="Playback settings">
+    <div class="row">
+      <div><label for="a-loops">Plays each</label>
+        <select id="a-loops"><option value="1">1 time</option><option value="3">3 times</option><option value="5">5 times</option><option value="10">10 times</option></select></div>
+      <div><label for="a-speed">Speed</label>
+        <select id="a-speed"><option value="1">Normal</option><option value="0.75">0.75x</option><option value="0.5">0.5x</option></select></div>
+    </div>
+  </section>
+
+  <div class="bar">
+    <p id="a-msg" role="status" aria-live="polite"></p>
+    <div class="row">
+      <button id="a-again" class="quiet"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16l13-8z" fill="currentColor"/></svg>Play again</button>
+      <button id="a-en-toggle" class="quiet">Hide English</button>
+    </div>
+    <div class="row">
+      <button id="a-prev" class="quiet"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Previous</button>
+      <button id="a-next" class="main">Next<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
   </div>
 </main>
 <script src="vendor/ts-fsrs.umd.js"></script>

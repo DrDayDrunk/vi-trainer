@@ -28,7 +28,10 @@ function showHome() {
   $('study').textContent = ready ? 'Start studying' : nx ? 'Next card at ' + clock(nx.wait) : 'Nothing to study yet';
   const r = reminder(settings, count(deck.cards), now);
   $('nudge').hidden = !r; $('nudge-text').textContent = r || '';
-  $('review').hidden = $('backup').hidden = true; $('home').hidden = false;
+  const al = E.readAlong(deck, numbers);
+  $('to-along').disabled = !al.length;
+  $('to-along').textContent = al.length || !numbers.length ? 'Read along' : 'Read along (no new sentences left)';
+  $('review').hidden = $('backup').hidden = $('along').hidden = true; $('home').hidden = false;
 }
 
 async function refresh() { numbers = await allNumbers(db); showHome(); }
@@ -194,6 +197,72 @@ $('pe').onclick = () => play('en');
 $('pv').onclick = () => play('vi');
 $('undo').onclick = undo;
 document.querySelectorAll('.grade').forEach(b => { b.onclick = () => grade(+b.dataset.g); });
+
+// ---------------------------------------------------------------- read-along (ticket 04)
+// Shows a sentence's Vietnamese text while its clip plays. It only reads sentences: nothing in this section
+// touches the deck, so it cannot change any card's schedule (a test checks this section for that).
+const GAP_MS = 1500;                                   // ponytail: fixed pause between repeats, not scaled to the clip length; scale it if long sentences feel rushed
+const prefs = { loops: 3, speed: 1, showEn: true };    // kept while the app stays open, forgotten when it is closed
+let along = null, run = 0, alUrl = null;               // run goes up on every step, replay and exit, so an older loop stops itself
+const sleep = ms => new Promise(ok => setTimeout(ok, ms));
+const setSpeed = () => { player.defaultPlaybackRate = player.playbackRate = prefs.speed; };
+const showEnglish = () => { $('a-en').hidden = !prefs.showEn; $('a-en-toggle').textContent = prefs.showEn ? 'Hide English' : 'Show English'; };
+
+// Plays the clip prefs.loops times. The first play starts straight from the tap (or from a step, as in review).
+async function playLoops(my) {
+  const out = $('a-msg');
+  player.src = alUrl; setSpeed();                      // loading a clip resets the speed, so it is set after
+  player.preservesPitch = player.webkitPreservesPitch = true;   // slower must not change the tones
+  for (let k = 1; k <= prefs.loops; k++) {
+    say(out, 'Play ' + k + ' of ' + prefs.loops);
+    const end = new Promise(ok => { player.onended = player.onerror = ok; });
+    try { await player.play(); } catch { if (my === run) say(out, 'Tap Play again to hear it.', true); return; }
+    await end;
+    if (my !== run) return;
+    if (k < prefs.loops) { await sleep(GAP_MS); if (my !== run) return; }
+  }
+  say(out, along.i === along.set.length - 1 ? 'Last sentence of this set.' : 'Done. Tap Next, or Play again.');
+}
+
+async function alShow(i) {
+  const my = ++run, n = along.set[i];
+  player.pause(); if (alUrl) URL.revokeObjectURL(alUrl); alUrl = null;
+  along.i = i;
+  $('a-pos').textContent = (i + 1) + ' of ' + along.set.length;
+  $('a-prev').disabled = i === 0; $('a-next').disabled = i === along.set.length - 1;
+  $('a-num').textContent = 'Sentence ' + n; say($('a-msg'), '');
+  let s = null;
+  try { s = await getSentence(db, n); } catch { /* shown below */ }
+  if (my !== run) return;
+  $('a-vi').textContent = s ? s.vi_text : ''; $('a-en').textContent = s ? s.en_text : '';
+  if (!s) return say($('a-msg'), 'Sentence ' + n + ' could not be read from this phone.', true);
+  alUrl = URL.createObjectURL(new Blob([s.vi_audio], { type: 'audio/mp4' }));
+  playLoops(my);
+}
+
+function leaveAlong() {
+  ++run; player.pause(); player.onended = player.onerror = null;
+  player.defaultPlaybackRate = player.playbackRate = 1;           // review must not inherit a slow speed
+  if (alUrl) URL.revokeObjectURL(alUrl); alUrl = null;
+  showHome();
+}
+
+$('to-along').onclick = () => {
+  const set = E.readAlong(deck, numbers);
+  if (!set.length) return;
+  along = { set, i: 0 };
+  $('a-loops').value = prefs.loops; $('a-speed').value = prefs.speed; showEnglish();
+  $('home').hidden = true; $('along').hidden = false;
+  alShow(0);
+};
+$('a-back').onclick = leaveAlong;
+$('a-prev').onclick = () => alShow(along.i - 1);
+$('a-next').onclick = () => alShow(along.i + 1);
+$('a-again').onclick = () => { if (alUrl) { const my = ++run; player.pause(); playLoops(my); } };
+$('a-en-toggle').onclick = () => { prefs.showEn = !prefs.showEn; showEnglish(); };
+$('a-loops').onchange = e => { prefs.loops = +e.target.value; };
+$('a-speed').onchange = e => { prefs.speed = +e.target.value; setSpeed(); };
+// ---------------------------------------------------------------- end of read-along
 
 (async () => {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
