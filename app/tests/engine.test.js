@@ -138,3 +138,25 @@ test('a bad grade or card number is refused and nothing changes', () => {
   for (const [n, g] of [[1, 0], [1, 5], [1, 'Good'], [1.5, GOOD], ['1', GOOD]]) assert.throws(() => E.review(d, n, g, at(9)));
   assert.deepEqual(d, emptyDeck());
 });
+
+// ---- read-along (ticket 04): which sentences make up the set, and proof that choosing them changes nothing
+
+test('read-along set: the next 10 sentences with no card, in course order, whatever order the pack is in', () => {
+  const pack = [60, 3, 2, 1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+  const deck = withCards({ 2: hand(State.Review, at(9)), 5: hand(State.Learning, at(9)) });
+  assert.deepEqual(E.readAlong(deck, pack), [1, 3, 4, 6, 7, 8, 9, 10, 11, 12]);
+});
+
+test('read-along set: fewer than 10 left gives what is left, none left gives an empty set', () => {
+  assert.deepEqual(E.readAlong(emptyDeck(), [1, 2, 3]), [1, 2, 3]);
+  assert.deepEqual(E.readAlong(withCards({ 1: hand(State.Review, at(9)) }), [1]), []);
+  assert.deepEqual(E.readAlong(emptyDeck(), []), []);
+});
+
+test('read-along set: choosing it leaves the deck exactly as it was', () => {
+  const deck = withCards({ 1: hand(State.Review, at(9)), 2: hand(State.Learning, at(9)) });
+  Object.values(deck.cards).forEach(Object.freeze); Object.freeze(deck.cards); Object.freeze(deck);   // any write would throw
+  const before = JSON.stringify(deck);
+  E.readAlong(deck, [1, 2, 3, 4]);
+  assert.equal(JSON.stringify(deck), before);
+});

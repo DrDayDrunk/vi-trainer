@@ -21,3 +21,11 @@ test('the app loads nothing from the internet', () => {
   for (const f of ['index.html', 'style.css', 'app.js', 'sw.js', 'engine.js', 'pack.js', 'store.js', 'backup.js'])
     assert.doesNotMatch(read(f), /https?:\/\/(?!www\.w3\.org)/, f);
 });
+
+// Read-along must never change progress: its section of app.js may not save, replace, grade or undo anything.
+test('the read-along code cannot touch card progress', () => {
+  const app = read('app.js'), dash = '-'.repeat(64);
+  const a = app.indexOf('// ' + dash + ' read-along'), b = app.indexOf('// ' + dash + ' end of read-along');
+  assert.ok(a >= 0 && b > a, 'read-along section markers not found');
+  assert.doesNotMatch(app.slice(a, b), /saveDeck|replaceDeck|savePack|saveSettings|E\.review|E\.undo|deck\s*=[^=]/);
+});
