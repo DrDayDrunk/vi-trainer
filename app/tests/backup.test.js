@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { E, realDeck } from './helpers.js';
-import { makeBackup, backupName, readBackup, newest, refusal, reminder } from '../backup.js';
+import { makeBackup, backupName, readBackup, newest, refusal, reminder, cleanSettings, DEFAULTS } from '../backup.js';
 
 const NOW = new Date(2026, 10, 3, 14, 5);
 const deck = realDeck();
@@ -110,4 +110,42 @@ test('the backup reminder', () => {
   assert.match(reminder(s(7, last), 5, new Date(NOW.getTime() + day)), /7 days ago/);
   assert.match(reminder(s(3, last), 5, NOW), /6 days ago/);
   assert.equal(reminder(s(7, new Date(NOW.getTime() + day).toISOString()), 5, NOW), null);   // clock moved back: no nag
+});
+
+// ---- ticket 05: the plan settings travel in the backup
+
+test('the daily limit, target retention and starting sentence go into the backup and come back', () => {
+  const b = makeBackup(deck, 7, NOW, { newPerDay: 20, retention: 0.85, startAt: 60 });
+  assert.deepEqual(b.settings, { backupDays: 7, newPerDay: 20, retention: 0.85, startAt: 60 });
+  const got = readBackup(text(b));
+  assert.deepEqual([got.backupDays, got.newPerDay, got.retention, got.startAt], [7, 20, 0.85, 60]);
+  assert.doesNotMatch(text(b), /\"today\"|\"intro\"/);                      // today's list is not part of the file
+});
+
+test('a start sentence of null (never set) is a value; a backup from before ticket 05 has none of these settings', () => {
+  assert.equal(readBackup(text(makeBackup(deck, 7, NOW, { startAt: null }))).startAt, null);
+  const old = readBackup(text());                                          // settings: { backupDays } only
+  assert.deepEqual([old.newPerDay, old.retention, old.startAt], [undefined, undefined, undefined]);
+  assert.equal(readBackup(withCards(o => { delete o.settings; })).newPerDay, undefined);
+});
+
+test('bad daily limit, retention or start sentence in a backup are refused', () => {
+  const bad = [['newPerDay', 12], ['newPerDay', -5], ['newPerDay', '10'], ['newPerDay', 1.5], ['newPerDay', null],
+    ['retention', 0.5], ['retention', '0.9'], ['retention', 1], ['retention', 0], ['retention', null],
+    ['startAt', 0], ['startAt', 3001], ['startAt', 1.5], ['startAt', '5'], ['startAt', -1]];
+  for (const [k, v] of bad) refused(withCards(o => { o.settings[k] = v; }), /setting/);
+});
+
+test('every good daily limit and retention choice is accepted', () => {
+  for (const n of [0, 5, 10, 15, 20, 30]) assert.equal(readBackup(text(makeBackup(deck, 7, NOW, { newPerDay: n }))).newPerDay, n);
+  for (const r of [0.8, 0.85, 0.9, 0.95]) assert.equal(readBackup(text(makeBackup(deck, 7, NOW, { retention: r }))).retention, r);
+  for (const a of [1, 60, 3000]) assert.equal(readBackup(text(makeBackup(deck, 7, NOW, { startAt: a }))).startAt, a);
+});
+
+test('settings are cleaned one by one: good values kept, anything else replaced by the default', () => {
+  assert.deepEqual(cleanSettings(undefined), { ...DEFAULTS, lastBackup: null });
+  assert.deepEqual(cleanSettings({ backupDays: 14, lastBackup: 'x', newPerDay: 15, retention: 0.95, startAt: 100 }),
+    { backupDays: 14, lastBackup: 'x', newPerDay: 15, retention: 0.95, startAt: 100 });
+  assert.deepEqual(cleanSettings({ backupDays: 5, newPerDay: 99, retention: 2, startAt: 'a' }), { ...DEFAULTS, lastBackup: null });
+  assert.deepEqual(DEFAULTS, { backupDays: 7, newPerDay: 10, retention: 0.9, startAt: null });
 });

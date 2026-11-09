@@ -7,6 +7,7 @@ try { await import('fake-indexeddb/auto'); } catch { ready = false; }
 const { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck, replaceDeck, loadSettings, saveSettings } = await import('../store.js');
 const { realDeck, E } = await import('./helpers.js');
 const opts = { skip: !ready && 'fake-indexeddb not installed' };
+const S = o => ({ backupDays: 7, lastBackup: null, newPerDay: 10, retention: 0.9, startAt: null, ...o });   // every setting, with defaults
 
 const gone = () => new Promise(ok => { const r = indexedDB.deleteDatabase('vitrainer'); r.onsuccess = r.onerror = r.onblocked = ok; });
 const sentence = n => ({ number: n, level: 1, track: 1, en_text: 'e' + n, vi_text: 'v' + n, en_audio: new ArrayBuffer(8), vi_audio: new ArrayBuffer(8) });
@@ -85,9 +86,9 @@ const one = d => E.review({ cards: {}, last: null }, 1, 3, new Date(2026, 10, d,
 
 test('settings start at their defaults and come back as saved', opts, async () => {
   await gone(); const db = await openDb();
-  assert.deepEqual(await loadSettings(db), { backupDays: 7, lastBackup: null });
-  await saveSettings(db, { backupDays: 14, lastBackup: NOW.toISOString() });
-  assert.deepEqual(await loadSettings(db), { backupDays: 14, lastBackup: NOW.toISOString() });
+  assert.deepEqual(await loadSettings(db), S());
+  await saveSettings(db, S({ backupDays: 14, lastBackup: NOW.toISOString(), newPerDay: 20, retention: 0.95, startAt: 60 }));
+  assert.deepEqual(await loadSettings(db), S({ backupDays: 14, lastBackup: NOW.toISOString(), newPerDay: 20, retention: 0.95, startAt: 60 }));
   db.close();
 });
 
@@ -102,7 +103,7 @@ test('wipe test: the progress of a wiped phone comes back from the backup with e
   const after = await loadDeck(db);
   assert.deepEqual(after.cards, d.cards);                       // same state and same due time, card by card
   assert.equal(after.last, null);                               // undo information is not restored
-  assert.deepEqual(await loadSettings(db), { backupDays: 14, lastBackup: NOW.toISOString() });
+  assert.deepEqual(await loadSettings(db), S({ backupDays: 14, lastBackup: NOW.toISOString() }));
   db.close();
 });
 
@@ -119,13 +120,13 @@ test('restoring leaves the imported sentences alone, whichever came first', opts
 test('a restore that would lose progress is refused inside storage and nothing changes', opts, async () => {
   await gone(); const db = await openDb();
   const mine = realDeck(); await seed(db, mine);
-  await saveSettings(db, { backupDays: 3, lastBackup: null });
+  await saveSettings(db, S({ backupDays: 3 }));
   const fewer = { 1: mine.cards[1] }, empty = {};
   const older = Object.fromEntries(Object.entries(mine.cards).map(([k, c]) => [k, { ...c, last_review: '2026-10-01T10:00:00.000Z' }]));
   for (const bad of [empty, fewer, older]) {
     await assert.rejects(replaceDeck(db, bad, 30, NOW), /Nothing was changed/);
     assert.deepEqual(await loadDeck(db), mine);
-    assert.deepEqual(await loadSettings(db), { backupDays: 3, lastBackup: null });
+    assert.deepEqual(await loadSettings(db), S({ backupDays: 3 }));
   }
   db.close();
 });
@@ -144,5 +145,55 @@ test('a restore never goes over progress that cannot be read', opts, async () =>
   await new Promise(ok => { const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put('garbage', 'deck'); tx.oncomplete = ok; });
   await assert.rejects(replaceDeck(db, one(3), 7, NOW), /could not be read/);
   await assert.rejects(loadDeck(db), /could not be read/);      // still there, untouched
+  db.close();
+});
+
+// ---- ticket 05: daily plan settings
+
+test('settings that are missing, unreadable or out of range fall back to the defaults, one by one', opts, async () => {
+  await gone(); const db = await openDb();
+  const put = v => new Promise(ok => { const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put(v, 'settings'); tx.oncomplete = ok; });
+  for (const bad of ['garbage', null, [], 5]) { await put(bad); assert.deepEqual(await loadSettings(db), S()); }
+  await put({ backupDays: 14, newPerDay: 12, retention: 0.5, startAt: 0 });          // only the good one survives
+  assert.deepEqual(await loadSettings(db), S({ backupDays: 14 }));
+  await put({ backupDays: 7, newPerDay: 0, retention: 0.8, startAt: 3000 });          // 0 new a day is a real choice
+  assert.deepEqual(await loadSettings(db), S({ newPerDay: 0, retention: 0.8, startAt: 3000 }));
+  db.close();
+});
+
+test('settings from an older version of the app (no plan settings) load with the defaults', opts, async () => {
+  await gone(); const db = await openDb();
+  await saveSettings(db, { backupDays: 30, lastBackup: NOW.toISOString() });
+  assert.deepEqual(await loadSettings(db), S({ backupDays: 30, lastBackup: NOW.toISOString() }));
+  db.close();
+});
+
+test('a restore writes the backup\'s plan settings together with the cards; settings it does not have stay as they are', opts, async () => {
+  await gone(); const db = await openDb();
+  await saveSettings(db, S({ newPerDay: 5, retention: 0.8, startAt: 7 }));
+  await replaceDeck(db, one(3), 14, NOW, { newPerDay: 20, retention: undefined, startAt: undefined });
+  assert.deepEqual(await loadSettings(db), S({ backupDays: 14, lastBackup: NOW.toISOString(), newPerDay: 20, retention: 0.8, startAt: 7 }));
+  await replaceDeck(db, realDeck().cards, 14, NOW, { startAt: null, retention: 0.95 });      // null means "never set": it is a value
+  assert.deepEqual(await loadSettings(db), S({ backupDays: 14, lastBackup: NOW.toISOString(), newPerDay: 20, retention: 0.95, startAt: null }));
+  db.close();
+});
+
+test('a refused restore changes none of the plan settings', opts, async () => {
+  await gone(); const db = await openDb();
+  const mine = realDeck(); await seed(db, mine);
+  await saveSettings(db, S({ newPerDay: 5, startAt: 7 }));
+  await assert.rejects(replaceDeck(db, { 1: mine.cards[1] }, 30, NOW, { newPerDay: 30, retention: 0.95, startAt: 99 }), /Nothing was changed/);
+  assert.deepEqual(await loadSettings(db), S({ newPerDay: 5, startAt: 7 }));
+  db.close();
+});
+
+test('today\'s record (introduced sentences, learn more) is saved with the grade and survives closing the app', opts, async () => {
+  await gone(); let db = await openDb();
+  const d = E.learnMore(E.review({ cards: {}, last: null }, 1, 3, NOW), NOW);
+  await saveDeck(db, d); db.close();
+  db = await openDb();
+  const back = await loadDeck(db);
+  assert.deepEqual(back, d);
+  assert.deepEqual(back.today.intro, [1]); assert.equal(back.today.extra, 5);
   db.close();
 });

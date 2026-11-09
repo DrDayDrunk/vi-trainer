@@ -29,3 +29,10 @@ test('the read-along code cannot touch card progress', () => {
   assert.ok(a >= 0 && b > a, 'read-along section markers not found');
   assert.doesNotMatch(app.slice(a, b), /saveDeck|replaceDeck|savePack|saveSettings|E\.review|E\.undo|deck\s*=[^=]/);
 });
+
+// A mistyped element name would only show up on the phone, so check them all here.
+test('every element app.js looks up exists in index.html', () => {
+  const ids = new Set([...read('index.html').matchAll(/ id="([^"]+)"/g)].map(m => m[1]));
+  const used = [...read('app.js').matchAll(/\$\('([^']+)'\)/g)].map(m => m[1]);
+  assert.deepEqual([...new Set(used)].filter(id => !ids.has(id)), []);
+});
