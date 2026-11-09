@@ -4,17 +4,33 @@ export const FORMAT = 'vi-trainer-backup';
 export const VERSION = 1;
 export const REMIND_CHOICES = [3, 7, 14, 30];
 export const DEFAULT_DAYS = 7;
+export const NEW_CHOICES = [0, 5, 10, 15, 20, 30];            // new sentences a day; 0 = reviews only
+export const RETENTION_CHOICES = [0.8, 0.85, 0.9, 0.95];
+export const DEFAULTS = { backupDays: DEFAULT_DAYS, newPerDay: 10, retention: 0.9, startAt: null };   // startAt null = never set
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 const isDate = v => typeof v === 'string' && ISO.test(v) && !isNaN(Date.parse(v));
 const isNum = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const isInt = v => Number.isInteger(v) && v >= 0;
 const plain = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const goodSetting = {
+  backupDays: v => REMIND_CHOICES.includes(v), newPerDay: v => NEW_CHOICES.includes(v),
+  retention: v => RETENTION_CHOICES.includes(v), startAt: v => v === null || (Number.isInteger(v) && v >= 1 && v <= 3000),
+};
 const no = why => { throw new Error(why + ' Nothing was changed.'); };
 
-export const makeBackup = (deck, backupDays, now) => ({
+// Settings are not progress: any value that is missing or not one of the allowed choices becomes its default.
+export function cleanSettings(s) {
+  const o = plain(s) ? s : {};
+  const out = { lastBackup: o.lastBackup || null };
+  for (const k of Object.keys(DEFAULTS)) out[k] = goodSetting[k](o[k]) ? o[k] : DEFAULTS[k];
+  return out;
+}
+
+// `more` carries the daily plan settings (newPerDay, retention, startAt). Today's list of introduced sentences is not saved.
+export const makeBackup = (deck, backupDays, now, more = {}) => ({
   format: FORMAT, version: VERSION, exported_at: now.toISOString(),
-  card_count: Object.keys(deck.cards).length, settings: { backupDays }, cards: deck.cards,
+  card_count: Object.keys(deck.cards).length, settings: { backupDays, ...more }, cards: deck.cards,
 });
 
 const pad = n => String(n).padStart(2, '0');
@@ -30,7 +46,7 @@ function cleanCard(n, c) {
   return { due, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, learning_steps, state, last_review };   // known fields only
 }
 
-// Returns { cards, backupDays, exported_at } or throws. backupDays is undefined when the file has no such setting.
+// Returns { cards, backupDays, newPerDay, retention, startAt, exported_at } or throws. A setting is undefined when the file has none.
 export function readBackup(text) {
   let o;
   try { o = JSON.parse(text); } catch { no('This is not a valid backup: the file could not be read.'); }
@@ -45,13 +61,16 @@ export function readBackup(text) {
     if (!/^[1-9]\d*$/.test(k) || +k > 3000) no('This is not a valid backup: "' + k + '" is not a sentence number.');
     cards[k] = cleanCard(k, o.cards[k]);
   }
-  let backupDays;
+  const got = {};
   if (o.settings !== undefined) {
     if (!plain(o.settings)) no('This is not a valid backup: its settings are damaged.');
-    backupDays = o.settings.backupDays;
-    if (backupDays !== undefined && !REMIND_CHOICES.includes(backupDays)) no('This is not a valid backup: its reminder setting is damaged.');
+    for (const [k, name] of [['backupDays', 'reminder'], ['newPerDay', 'daily limit'], ['retention', 'target retention'], ['startAt', 'starting sentence']]) {
+      if (o.settings[k] === undefined) continue;
+      if (!goodSetting[k](o.settings[k])) no('This is not a valid backup: its ' + name + ' setting is damaged.');
+      got[k] = o.settings[k];
+    }
   }
-  return { cards, backupDays, exported_at: o.exported_at };
+  return { cards, ...got, exported_at: o.exported_at };
 }
 
 // Time of the most recent review in a set of cards (as written in the card), or null.

@@ -25,6 +25,7 @@
       <div><dt>Learning</dt><dd id="c-learning">0</dd></div>
       <div><dt>Due</dt><dd id="c-review">0</dd></div>
     </dl>
+    <p id="next-new" class="muted"></p>
   </section>
 
   <section id="nudge" class="card" hidden>
@@ -34,11 +35,50 @@
 
   <section class="actions">
     <button id="study" class="main" disabled>Start studying</button>
+    <button id="learn-more" class="quiet" disabled>Learn more</button>
     <button id="to-along" class="quiet" disabled>Read along</button>
     <button id="pick" class="quiet">Import sentences</button>
     <button id="to-backup" class="quiet">Backup</button>
+    <button id="to-settings" class="quiet">Settings</button>
     <input id="file" type="file" accept=".json,application/json" hidden>
     <p id="msg" role="status" aria-live="polite"></p>
+  </section>
+</main>
+
+<main id="settings" hidden>
+  <div class="top">
+    <button id="st-back" class="quiet"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Home</button>
+  </div>
+  <h1>Settings</h1>
+  <p id="st-msg" role="status" aria-live="polite"></p>
+
+  <section class="card" aria-labelledby="h-new">
+    <h2 id="h-new">New sentences</h2>
+    <label for="st-new">New sentences per day</label>
+    <select id="st-new">
+      <option value="0">0 (reviews only)</option><option value="5">5</option><option value="10">10</option>
+      <option value="15">15</option><option value="20">20</option><option value="30">30</option>
+    </select>
+    <p class="muted">When you have spare time, Learn more on Home adds 5 extra for today only. Reviews that are due always come first.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-ret">
+    <h2 id="h-ret">Target retention</h2>
+    <label for="st-ret">How much you want to remember</label>
+    <select id="st-ret">
+      <option value="0.8">80%</option><option value="0.85">85%</option><option value="0.9">90%</option><option value="0.95">95%</option>
+    </select>
+    <p class="muted">Higher means fewer forgotten sentences but more reviews. It applies to grades you give from now on; cards already scheduled keep their due times.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-start">
+    <h2 id="h-start">Starting sentence</h2>
+    <p id="st-pos" class="muted"></p>
+    <div id="st-start">
+      <label for="st-at">Start the course at sentence</label>
+      <input id="st-at" type="number" inputmode="numeric" min="1" max="3000" step="1">
+      <button id="st-at-save" class="quiet">Set starting sentence</button>
+    </div>
   </section>
 </main>
 

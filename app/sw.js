@@ -1,6 +1,6 @@
 // Offline support: every app file is saved on the phone at install. Files are served from the saved copy
 // first and refreshed quietly in the background, so a new version appears the next time the app is opened.
-const CACHE = 'vi-trainer-app-v4';   // change this number when files change, so old copies are dropped
+const CACHE = 'vi-trainer-app-v5';   // change this number when files change, so old copies are dropped
 const FILES = [
   './', './index.html', './style.css', './app.js', './engine.js', './pack.js', './store.js', './backup.js',
   './vendor/ts-fsrs.umd.js', './manifest.webmanifest', './icon-180.png', './icon-512.png',

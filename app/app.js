@@ -1,12 +1,14 @@
-import { createEngine } from './engine.js';
+import { createEngine, MORE } from './engine.js';
 import { validatePack } from './pack.js';
 import { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck, replaceDeck, loadSettings, saveSettings } from './store.js';
 import { makeBackup, backupName, readBackup, newest, refusal, reminder } from './backup.js';
 
 const $ = id => document.getElementById(id);
-const E = createEngine(window.FSRS);
 const player = new Audio();
-let db, deck, settings, numbers = [], card = null, blobUrl = null, busy = false, pending = null;
+let E, db, deck, settings, numbers = [], card = null, blobUrl = null, busy = false, pending = null;
+// The engine is made again whenever the target retention changes. cfg() is what the engine needs from the settings.
+const useSettings = s => { if (!settings || s.retention !== settings.retention) E = createEngine(window.FSRS, { retention: s.retention }); settings = s; };
+const cfg = () => ({ newPerDay: settings.newPerDay, startAt: settings.startAt });
 
 const say = (el, text, bad = false) => { el.textContent = text; el.className = bad ? 'error' : ''; };
 const clock = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -18,20 +20,24 @@ const when = iso => new Date(iso).toLocaleString([], { day: 'numeric', month: 's
 // ---------------------------------------------------------------- home
 
 function showHome() {
-  const now = new Date(), c = E.counts(deck, numbers, now), nx = E.next(deck, numbers, now);
+  const now = new Date(), c = E.counts(deck, numbers, now, cfg()), nx = E.next(deck, numbers, now, cfg()), p = E.plan(deck, numbers, now, cfg());
   $('c-new').textContent = c.new; $('c-learning').textContent = c.learning; $('c-review').textContent = c.review;
   $('status').textContent = numbers.length
     ? numbers.length + ' sentences on this phone (' + numbers[0] + ' to ' + numbers[numbers.length - 1] + ').'
     : 'No sentences on this phone yet. Tap Import sentences.';
+  $('next-new').textContent = !numbers.length ? '' : p.pos === null ? 'All 3000 sentences have been started.'
+    : !p.onPhone ? 'Next new sentence: ' + p.pos + ', which is not on this phone yet. Import it, or change the starting sentence in Settings.'
+    : 'Next new sentence: ' + p.pos + '.' + (c.new ? '' : ' Today\'s new sentences are done.');
+  $('learn-more').disabled = !p.more; $('learn-more').textContent = 'Learn more (+' + MORE + ' new sentences)';
   const ready = nx && nx.n !== undefined;
   $('study').disabled = !ready;
   $('study').textContent = ready ? 'Start studying' : nx ? 'Next card at ' + clock(nx.wait) : 'Nothing to study yet';
   const r = reminder(settings, count(deck.cards), now);
   $('nudge').hidden = !r; $('nudge-text').textContent = r || '';
-  const al = E.readAlong(deck, numbers);
+  const al = E.readAlong(deck, numbers, now, cfg());
   $('to-along').disabled = !al.length;
-  $('to-along').textContent = al.length || !numbers.length ? 'Read along' : 'Read along (no new sentences left)';
-  $('review').hidden = $('backup').hidden = $('along').hidden = true; $('home').hidden = false;
+  $('to-along').textContent = al.length || !numbers.length ? 'Read along' : 'Read along (no new sentences today)';
+  $('review').hidden = $('backup').hidden = $('along').hidden = $('settings').hidden = true; $('home').hidden = false;
 }
 
 async function refresh() { numbers = await allNumbers(db); showHome(); }
@@ -53,7 +59,7 @@ function play(kind) {
 // ---------------------------------------------------------------- review
 
 function render() {
-  const now = new Date(), c = E.counts(deck, numbers, now), done = !card;
+  const now = new Date(), c = E.counts(deck, numbers, now, cfg()), done = !card;
   $('left').textContent = 'New ' + c.new + '  Learning ' + c.learning + '  Due ' + c.review;
   $('card').hidden = done; $('done').hidden = !done;
   $('reveal').hidden = done || card.revealed; $('grades').hidden = done || !card.revealed;
@@ -67,10 +73,11 @@ function render() {
 }
 
 async function showCard(forced) {
-  const nx = forced || E.next(deck, numbers, new Date());
+  const nx = forced || E.next(deck, numbers, new Date(), cfg());
   if (!nx || nx.n === undefined) {
     card = null;
-    $('done-text').textContent = nx ? 'Nothing more right now. The next card is due at ' + clock(nx.wait) + '.' : 'You have finished for now.';
+    $('done-text').textContent = nx ? 'Nothing more right now. The next card is due at ' + clock(nx.wait) + '.'
+      : 'You have finished for now.' + (E.plan(deck, numbers, new Date(), cfg()).more ? ' For more new sentences, go to Home and tap Learn more.' : '');
     return render();
   }
   const s = await getSentence(db, nx.n);
@@ -114,7 +121,7 @@ function showBackup() {
 // then the same text as a plain-text file, then a plain download.
 async function exportBackup() {
   const out = $('bk-msg1'), now = new Date(), name = backupName(now), n = count(deck.cards);
-  const text = JSON.stringify(makeBackup(deck, settings.backupDays, now));
+  const text = JSON.stringify(makeBackup(deck, settings.backupDays, now, { newPerDay: settings.newPerDay, retention: settings.retention, startAt: settings.startAt }));
   const file = navigator.canShare && ['application/json', 'text/plain'].map(type => new File([text], name, { type })).find(f => navigator.canShare({ files: [f] }));
   try {
     if (file) await navigator.share({ files: [file] });
@@ -147,8 +154,8 @@ async function chooseBackup(file) {
 // replaceDeck checks the rules again against what is really stored, so a stale screen cannot cause a bad restore.
 async function restore(b) {
   try {
-    await replaceDeck(db, b.cards, b.backupDays, new Date());
-    deck = await loadDeck(db); settings = await loadSettings(db); pending = null;
+    await replaceDeck(db, b.cards, b.backupDays, new Date(), { newPerDay: b.newPerDay, retention: b.retention, startAt: b.startAt });
+    deck = await loadDeck(db); useSettings(await loadSettings(db)); pending = null;
     const have = new Set(numbers), missing = Object.keys(deck.cards).filter(n => !have.has(+n)).length;
     showHome();
     say($('msg'), 'Restored ' + count(deck.cards) + ' cards.' + (missing === 1 ? ' 1 card has no sentence on this phone yet. Tap Import sentences to add it.' : missing ? ' ' + missing + ' cards have no sentence on this phone yet. Tap Import sentences to add them.' : ''));
@@ -197,6 +204,44 @@ $('pe').onclick = () => play('en');
 $('pv').onclick = () => play('vi');
 $('undo').onclick = undo;
 document.querySelectorAll('.grade').forEach(b => { b.onclick = () => grade(+b.dataset.g); });
+
+// ---------------------------------------------------------------- daily plan and settings (ticket 05)
+
+// Learn more: a few extra new sentences for today only. No card changes; only today's record is saved.
+$('learn-more').onclick = async () => {
+  if (busy) return;
+  busy = true;
+  try { const next = E.learnMore(deck, new Date()); await saveDeck(db, next); deck = next; showHome(); say($('msg'), MORE + ' extra new sentences added for today.'); }
+  catch { say($('msg'), 'That could not be saved. Nothing was changed.', true); }
+  finally { busy = false; }
+};
+
+function showSettings() {
+  const started = count(deck.cards) > 0, p = E.plan(deck, numbers, new Date(), cfg());
+  say($('st-msg'), '');
+  $('st-new').value = settings.newPerDay; $('st-ret').value = settings.retention;
+  $('st-start').hidden = started; $('st-at').value = settings.startAt ?? '';
+  $('st-pos').textContent = started ? 'Your course started at sentence ' + p.start + '. It can only be set before your first review.'
+    : 'Where the course begins for you. It can only be set before your first review. Until you set it, it begins at sentence 1.';
+  $('home').hidden = true; $('settings').hidden = false;
+}
+
+// Settings are not progress, but a failed save still says so and puts the old value back.
+async function saveSetting(patch, done, undoField) {
+  const next = { ...settings, ...patch };
+  try { await saveSettings(db, next); useSettings(next); say($('st-msg'), done); }
+  catch { undoField(); say($('st-msg'), 'That could not be saved. Nothing was changed.', true); }
+}
+$('to-settings').onclick = showSettings;
+$('st-back').onclick = showHome;
+$('st-new').onchange = e => saveSetting({ newPerDay: +e.target.value }, 'Saved. ' + (+e.target.value ? 'Up to ' + e.target.value + ' new sentences a day.' : 'No new sentences, reviews only.'), () => { e.target.value = settings.newPerDay; });
+$('st-ret').onchange = e => saveSetting({ retention: +e.target.value }, 'Saved. It applies to grades you give from now on.', () => { e.target.value = settings.retention; });
+$('st-at-save').onclick = () => {
+  const text = $('st-at').value.trim(), n = Number(text);
+  if (count(deck.cards)) return say($('st-msg'), 'The starting sentence can only be set before your first review. Nothing was changed.', true);
+  if (!/^\d+$/.test(text) || n < 1 || n > 3000) return say($('st-msg'), 'Type a whole number from 1 to 3000. Nothing was changed.', true);
+  saveSetting({ startAt: n }, 'Saved. The course starts at sentence ' + n + '.' + (numbers.includes(n) ? '' : ' That sentence is not on this phone yet. Import its pack from Home.'), () => { $('st-at').value = settings.startAt ?? ''; });
+};
 
 // ---------------------------------------------------------------- read-along (ticket 04)
 // Shows a sentence's Vietnamese text while its clip plays. It only reads sentences: nothing in this section
@@ -248,7 +293,7 @@ function leaveAlong() {
 }
 
 $('to-along').onclick = () => {
-  const set = E.readAlong(deck, numbers);
+  const set = E.readAlong(deck, numbers, new Date(), cfg());
   if (!set.length) return;
   along = { set, i: 0 };
   $('a-loops').value = prefs.loops; $('a-speed').value = prefs.speed; showEnglish();
@@ -266,10 +311,10 @@ $('a-speed').onchange = e => { prefs.speed = +e.target.value; setSpeed(); };
 
 (async () => {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
-  try { db = await openDb(); deck = await loadDeck(db); settings = await loadSettings(db); await refresh(); }
+  try { db = await openDb(); deck = await loadDeck(db); useSettings(await loadSettings(db)); await refresh(); }
   catch (err) {
     // If progress cannot be read the app stops, so it can never start from empty and save over it.
-    $('status').textContent = ''; $('study').disabled = $('pick').disabled = $('to-backup').disabled = true;
+    $('status').textContent = ''; $('study').disabled = $('pick').disabled = $('to-backup').disabled = $('to-settings').disabled = true;
     say($('msg'), /progress/.test(err.message) ? 'Your saved progress could not be read, so the app has stopped to protect it. Nothing was changed. Close the app and open it again.'
       : 'This phone would not open the app storage. Close the app and open it again.', true);
   }

@@ -51,8 +51,8 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 #backup label{display:block;margin-bottom:.5rem}
 #bk-confirm .row{margin:.5rem 0 0}
 #nudge p{margin:0 0 .75rem}
-select{font:inherit;width:100%;min-height:48px;padding:0 .75rem;border-radius:12px;border:1px solid var(--edge);background:var(--card);color:var(--fg)}
-select:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+select,input[type=number]{font:inherit;width:100%;min-height:48px;padding:0 .75rem;border-radius:12px;border:1px solid var(--edge);background:var(--card);color:var(--fg)}
+select:focus-visible,input[type=number]:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 #along{display:flex;flex-direction:column;min-height:calc(100dvh - 2.5rem)}
 #along .card{margin-bottom:.75rem}
 #a-vi{font-size:clamp(1.75rem,7vw,2.5rem);font-weight:600;line-height:1.35;margin:.25rem 0 .5rem}
@@ -64,3 +64,11 @@ select:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 #along label{display:block;margin-bottom:.25rem;font-size:.875rem;color:var(--muted)}
 .bar .row{margin-bottom:.5rem}
 .bar .row button{width:auto;margin:0}
+#next-new{margin:.75rem 0 0;font-size:.875rem}
+#settings .top{justify-content:flex-start}
+#settings label{display:block;margin-bottom:.5rem}
+#settings .card p{margin:.5rem 0 0;font-size:.875rem}
+#settings #st-msg{min-height:1.5rem;margin:0 0 .75rem}
+#st-msg.error{color:var(--error)}
+#st-at-save{width:100%;margin-top:.5rem}
+#settings #st-pos{margin:0 0 .75rem}
