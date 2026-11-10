@@ -9,7 +9,7 @@ const loaded = new Set();
 for (const m of read('index.html').matchAll(/(?:src|href)="([^"#]+)"/g)) if (!/^https?:/.test(m[1])) loaded.add(m[1]);
 for (const m of read('style.css').matchAll(/url\(([^)]+)\)/g)) loaded.add(m[1]);
 for (const f of ['app.js']) for (const m of read(f).matchAll(/from '\.\/([^']+)'/g)) loaded.add(m[1]);
-for (const f of ['engine.js', 'pack.js', 'store.js', 'backup.js']) for (const m of read(f).matchAll(/from '\.\/([^']+)'/g)) loaded.add(m[1]);
+for (const f of ['engine.js', 'pack.js', 'store.js', 'backup.js', 'session.js']) for (const m of read(f).matchAll(/from '\.\/([^']+)'/g)) loaded.add(m[1]);
 
 test('every file the page loads is saved for offline use', () => {
   assert.deepEqual([...loaded].filter(f => !listed.includes(f)), []);
@@ -18,7 +18,7 @@ test('every file in the offline list exists', () => {
   assert.deepEqual(listed.filter(f => !existsSync(new URL('../' + f, import.meta.url))), []);
 });
 test('the app loads nothing from the internet', () => {
-  for (const f of ['index.html', 'style.css', 'app.js', 'sw.js', 'engine.js', 'pack.js', 'store.js', 'backup.js'])
+  for (const f of ['index.html', 'style.css', 'app.js', 'sw.js', 'engine.js', 'pack.js', 'store.js', 'backup.js', 'session.js'])
     assert.doesNotMatch(read(f), /https?:\/\/(?!www\.w3\.org)/, f);
 });
 
@@ -35,4 +35,12 @@ test('every element app.js looks up exists in index.html', () => {
   const ids = new Set([...read('index.html').matchAll(/ id="([^"]+)"/g)].map(m => m[1]));
   const used = [...read('app.js').matchAll(/\$\('([^']+)'\)/g)].map(m => m[1]);
   assert.deepEqual([...new Set(used)].filter(id => !ids.has(id)), []);
+});
+
+// The hands-free builder must never change progress either: its section of app.js may not save, replace, grade or undo anything.
+test('the hands-free code cannot touch card progress', () => {
+  const app = read('app.js'), dash = '-'.repeat(64);
+  const a = app.indexOf('// ' + dash + ' hands-free'), b = app.indexOf('// ' + dash + ' end of hands-free');
+  assert.ok(a >= 0 && b > a, 'hands-free section markers not found');
+  assert.doesNotMatch(app.slice(a, b), /saveDeck|replaceDeck|savePack|saveSettings|E\.review|E\.undo|E\.learnMore|deck\s*=[^=]/);
 });
