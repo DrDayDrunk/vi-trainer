@@ -115,5 +115,15 @@ export function createEngine(FSRS, { retention = 0.9 } = {}) {
     return [...new Set([...p.intro.filter(n => have.has(n)), ...p.upcoming])].sort((a, b) => a - b);
   }
 
-  return { preview, review, undo, next, counts, readAlong, plan, learnMore };
+  // Everything a hands-free session may draw on, in the engine's own order: learning cards, reviews due today (most
+  // overdue first), today's new sentences. Due cards whose sentence is not on the phone are named in `missing`. Read-only.
+  function queue(deck, pack, now, cfg) {
+    const end = endOfStudyDay(now), have = new Set(pack);
+    const ready = Object.entries(deck.cards).map(([n, c]) => [+n, c]).filter(([, c]) => isLearning(c) || (c.state === State.Review && due(c) < end)).sort(byDue);
+    const pick = test => ready.filter(([n, c]) => test(c) && have.has(n)).map(x => x[0]);
+    return { learning: pick(isLearning), review: pick(c => !isLearning(c)), fresh: plan(deck, pack, now, cfg).upcoming,
+      missing: ready.filter(([n]) => !have.has(n)).map(x => x[0]) };
+  }
+
+  return { preview, review, undo, next, counts, readAlong, plan, learnMore, queue };
 }

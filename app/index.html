@@ -37,6 +37,7 @@
     <button id="study" class="main" disabled>Start studying</button>
     <button id="learn-more" class="quiet" disabled>Learn more</button>
     <button id="to-along" class="quiet" disabled>Read along</button>
+    <button id="to-hf" class="quiet" disabled>Hands-free session</button>
     <button id="pick" class="quiet">Import sentences</button>
     <button id="to-backup" class="quiet">Backup</button>
     <button id="to-settings" class="quiet">Settings</button>
@@ -120,6 +121,38 @@
     <select id="bk-days">
       <option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option>
     </select>
+  </section>
+</main>
+
+<main id="hf" hidden>
+  <div class="top">
+    <button id="hf-back" class="quiet"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Home</button>
+  </div>
+  <h1>Hands-free session</h1>
+  <p class="muted">Builds one audio file from today's new and due sentences: English, a pause, Vietnamese, a pause, Vietnamese. Save it to Files and play it in the built-in player. Listening never changes your cards.</p>
+
+  <section class="card" aria-label="Session settings">
+    <div class="row">
+      <div><label for="hf-min">Length</label>
+        <select id="hf-min"><option value="5">5 min</option><option value="10">10 min</option><option value="15">15 min</option><option value="20">20 min</option><option value="30">30 min</option></select></div>
+      <div><label for="hf-pause">Pauses</label>
+        <select id="hf-pause"><option value="0.75">Shorter</option><option value="1">Normal</option><option value="1.5">Longer</option><option value="2">Much longer</option></select></div>
+    </div>
+  </section>
+
+  <section class="card" aria-label="Build">
+    <button id="hf-today" class="main">Build for today</button>
+    <button id="hf-tomorrow" class="quiet">Build for tomorrow</button>
+    <p class="muted">Tomorrow plans for the next study day, which starts at 4 a.m. Use it in the evening. Keep the app open while it builds.</p>
+    <p id="hf-msg" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="hf-done" class="card" aria-labelledby="h-hf-ready" hidden>
+    <h2 id="h-hf-ready">Ready</h2>
+    <p id="hf-sum"></p>
+    <p id="hf-skip" class="muted"></p>
+    <button id="hf-save" class="main">Save to Files</button>
+    <p id="hf-msg2" role="status" aria-live="polite"></p>
   </section>
 </main>
 

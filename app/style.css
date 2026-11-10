@@ -72,3 +72,13 @@ select:focus-visible,input[type=number]:focus-visible{outline:2px solid var(--pr
 #st-msg.error{color:var(--error)}
 #st-at-save{width:100%;margin-top:.5rem}
 #settings #st-pos{margin:0 0 .75rem}
+#hf .top{justify-content:flex-start}
+#hf>p{margin:0 0 1rem}
+#hf label{display:block;margin-bottom:.25rem;font-size:.875rem;color:var(--muted)}
+#hf .row>div{flex:1;min-width:0}
+#hf .card .row{margin-bottom:0}
+#hf .card button+button{margin-top:.5rem;width:100%}
+#hf .card p{margin:.75rem 0 0;font-size:.875rem}
+#hf .card h2+p{margin-top:0;font-size:1rem}
+#hf-msg,#hf-msg2{min-height:1.5rem}
+#hf-msg.error,#hf-msg2.error{color:var(--error)}

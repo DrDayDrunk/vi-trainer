@@ -1,6 +1,7 @@
 import { createEngine, MORE } from './engine.js';
 import { validatePack } from './pack.js';
 import { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck, replaceDeck, loadSettings, saveSettings } from './store.js';
+import { mix, cost, planSession, render as stitch, toInt16, nextDay, cleanPrefs, sessionName, RATE } from './session.js';
 import { makeBackup, backupName, readBackup, newest, refusal, reminder } from './backup.js';
 
 const $ = id => document.getElementById(id);
@@ -37,7 +38,8 @@ function showHome() {
   const al = E.readAlong(deck, numbers, now, cfg());
   $('to-along').disabled = !al.length;
   $('to-along').textContent = al.length || !numbers.length ? 'Read along' : 'Read along (no new sentences today)';
-  $('review').hidden = $('backup').hidden = $('along').hidden = $('settings').hidden = true; $('home').hidden = false;
+  $('to-hf').disabled = !numbers.length;
+  $('review').hidden = $('backup').hidden = $('along').hidden = $('settings').hidden = $('hf').hidden = true; $('home').hidden = false;
 }
 
 async function refresh() { numbers = await allNumbers(db); showHome(); }
@@ -308,6 +310,86 @@ $('a-en-toggle').onclick = () => { prefs.showEn = !prefs.showEn; showEnglish(); 
 $('a-loops').onchange = e => { prefs.loops = +e.target.value; };
 $('a-speed').onchange = e => { prefs.speed = +e.target.value; setSpeed(); };
 // ---------------------------------------------------------------- end of read-along
+
+// ---------------------------------------------------------------- hands-free (ticket 06)
+// Builds one session audio file. It only reads cards and sentences: nothing in this section touches the deck, so it
+// cannot change any card's schedule or today's allowance (a test checks this section for that).
+const HF_KEY = 'vi-trainer-session';                // length and pause choice, kept on this phone only (not in the backup)
+let hf = { busy: false, file: null }, hfCtx = null;
+const hfPrefs = () => { try { return cleanPrefs(JSON.parse(localStorage.getItem(HF_KEY))); } catch { return cleanPrefs(null); } };
+const hfChosen = () => cleanPrefs({ minutes: +$('hf-min').value, scale: +$('hf-pause').value });
+const hfBusy = on => { hf.busy = on; $('hf-today').disabled = $('hf-tomorrow').disabled = $('hf-back').disabled = on; };
+const hfReset = () => { hf.file = null; $('hf-done').hidden = true; say($('hf-msg'), ''); say($('hf-msg2'), ''); };
+
+// A clip becomes 16-bit samples at the session's rate (decodeAudioData converts to the context's rate).
+async function hfDecode(bytes) {
+  hfCtx = hfCtx || new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, RATE);
+  return toInt16((await hfCtx.decodeAudioData(bytes.slice(0))).getChannelData(0));    // slice: decoding empties the copy it is given
+}
+
+async function hfBuild(tomorrow) {
+  if (hf.busy) return;
+  hfReset(); hfBusy(true);
+  const out = $('hf-msg'), t0 = Date.now(), { minutes, scale } = hfChosen(), now = tomorrow ? nextDay(new Date()) : new Date();
+  try {
+    const q = E.queue(deck, numbers, now, cfg()), order = mix(q), skipped = [...q.missing], clips = new Map(), items = [];
+    if (!order.length) return say(out, tomorrow ? 'Nothing is planned for tomorrow yet.' : 'Nothing to play today: nothing is due and today\'s new sentences are done. Try Build for tomorrow, or Learn more on Home.');
+    // Prepare sentences in order until there are enough to fill the length; the planner then picks what fits.
+    let sum = 0;
+    for (const o of order) {
+      if (sum >= minutes * 75) break;                // enough prepared (a quarter more than the length, so the planner has choices)
+      say(out, 'Preparing sentences: ' + items.length + ' ready...');
+      try {
+        const s = await getSentence(db, o.n), c = { en: await hfDecode(s.en_audio), vi: await hfDecode(s.vi_audio) };
+        if (!c.en.length || !c.vi.length) throw new Error('empty clip');
+        const it = { ...o, en: c.en.length / RATE, vi: c.vi.length / RATE };
+        clips.set(o.n, c); items.push(it); sum += cost(it, scale);
+      } catch { skipped.push(o.n); }
+    }
+    const plan = planSession(items, minutes, scale);
+    if (!plan.plays.length) return say(out, 'No sentence could be prepared on this phone, so no file was made. Nothing was changed.', true);
+    say(out, 'Joining the sounds...');
+    await sleep(30);                                 // lets the message show before the joining starts
+    const wav = stitch(plan.plays, n => clips.get(n), scale, RATE);
+    hf.file = new File([wav], sessionName(now, plan.seconds), { type: 'audio/wav' });
+    const sec = Math.round(plan.seconds), news = new Set(plan.plays.filter(p => p.kind === 'new').map(p => p.n)).size;
+    $('hf-sum').textContent = Math.floor(sec / 60) + ' min ' + (sec % 60) + ' s, ' + new Set(plan.plays.map(p => p.n)).size + ' sentences (' + news + ' new), '
+      + (wav.byteLength / 1e6).toFixed(1) + ' MB. Built in ' + Math.round((Date.now() - t0) / 1000) + ' s.'
+      + (plan.seconds < minutes * 60 - 60 ? ' Shorter than ' + minutes + ' min because that is all there is to play.' : '');
+    $('hf-skip').textContent = skipped.length ? 'Left out because the sentence is not on this phone or could not be read: ' + skipped.slice(0, 10).join(', ') + (skipped.length > 10 ? ' and ' + (skipped.length - 10) + ' more' : '') + '.' : '';
+    $('hf-skip').hidden = !skipped.length; $('hf-done').hidden = false; say(out, '');
+  } catch { say(out, 'The session could not be built on this phone. Nothing was changed.', true); }
+  finally { hfBusy(false); }
+}
+
+// The share sheet has to start straight from the tap, so nothing is awaited before it. If it cannot take the file,
+// the file is offered as a download instead.
+$('hf-save').onclick = async () => {
+  const f = hf.file, out = $('hf-msg2');
+  if (!f) return;
+  try {
+    if (!(navigator.canShare && navigator.canShare({ files: [f] }))) throw new Error('no share');
+    await navigator.share({ files: [f] });
+    say(out, 'Shared. Make sure you chose Save to Files, then play the file from the Files app.');
+  } catch (err) {
+    if (err.name === 'AbortError') return say(out, 'Not saved.');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(f); a.download = f.name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    say(out, 'The share sheet could not take the file, so a download was started instead. Look for ' + f.name + ' in Downloads or Files.');
+  }
+};
+
+$('to-hf').onclick = () => {
+  const p = hfPrefs();
+  $('hf-min').value = p.minutes; $('hf-pause').value = p.scale; hfReset();
+  $('home').hidden = true; $('hf').hidden = false;
+};
+$('hf-back').onclick = () => { hfReset(); showHome(); };
+$('hf-min').onchange = $('hf-pause').onchange = () => { try { localStorage.setItem(HF_KEY, JSON.stringify(hfChosen())); } catch { /* the choice just is not remembered */ } };
+$('hf-today').onclick = () => hfBuild(false);
+$('hf-tomorrow').onclick = () => hfBuild(true);
+// ---------------------------------------------------------------- end of hands-free
 
 (async () => {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
