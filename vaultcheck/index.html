@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Vault check</title>
+<style>
+  :root { --bg:#F8FAFC; --card:#FFFFFF; --fg:#0F172A; --muted:#475569; --primary:#0F766E; --on-primary:#FFFFFF; --edge:#6B7A8F; --line:#E2E8F0; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0F172A; --card:#1E293B; --fg:#F8FAFC; --muted:#CBD5E1; --primary:#2DD4BF; --on-primary:#042F2E; --edge:#64748B; --line:#334155; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background:var(--bg); color:var(--fg); font:1rem/1.5 -apple-system, system-ui, sans-serif; }
+  main { max-width:36rem; margin:0 auto; padding:1rem; }
+  h1 { font-size:1.375rem; margin:0 0 .5rem; }
+  p { margin:.5rem 0; color:var(--muted); }
+  label { display:block; margin:1rem 0 .25rem; font-weight:600; }
+  input { width:100%; min-height:44px; padding:.5rem .75rem; font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--edge); border-radius:12px; }
+  .row { display:flex; gap:.5rem; margin-top:1rem; flex-wrap:wrap; }
+  button { flex:1 1 9rem; min-height:48px; padding:.5rem 1rem; font:inherit; font-weight:600; color:var(--fg); background:transparent; border:1px solid var(--edge); border-radius:12px; }
+  button.main { color:var(--on-primary); background:var(--primary); border-color:var(--primary); }
+  button:disabled { opacity:.5; }
+  :focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+  textarea { width:100%; height:22rem; margin-top:1rem; padding:.75rem; font:.8125rem/1.4 ui-monospace, Menlo, monospace; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Vault check</h1>
+  <p>Test page for ticket 10. It reads and writes only the folder <b>vault-check</b> in your private vault repository, using made-up test text. No Glossika material. It never stores your token: close the page and it is gone.</p>
+
+  <label for="owner">GitHub user name</label>
+  <input id="owner" value="DrDayDrunk" autocapitalize="none" autocorrect="off" spellcheck="false">
+  <label for="repo">Vault repository name</label>
+  <input id="repo" value="vi-vault" autocapitalize="none" autocorrect="off" spellcheck="false">
+  <label for="token">Token (starts with github_pat_)</label>
+  <input id="token" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+
+  <div class="row">
+    <button id="run" class="main">Run check</button>
+    <button id="del">Delete test files</button>
+    <button id="copy">Copy log</button>
+  </div>
+  <textarea id="log" readonly aria-label="Check log"></textarea>
+</main>
+<script>
+const API = 'https://api.github.com';
+const DIR = 'vault-check', SMALL = DIR + '/small.json', LARGE = DIR + '/large.txt';
+const $ = id => document.getElementById(id);
+const lines = [];
+let token = '', owner = '', repo = '', lastRate = 'not shown by GitHub', failed = 0;
+
+function log(s) { lines.push(s); $('log').value = lines.join('\n'); }
+const utf8 = s => new TextEncoder().encode(s);
+function b64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+async function gh(method, path, o = {}) {
+  const headers = { Accept: o.raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json', Authorization: 'Bearer ' + token, ...o.headers };
+  if (o.body) headers['Content-Type'] = 'application/json';
+  const t0 = performance.now();
+  let r;
+  try { r = await fetch(API + path, { method, headers, body: o.body && JSON.stringify(o.body), cache: 'no-store' }); }
+  catch (e) { throw new Error('the request was blocked or never reached GitHub (' + e.name + ': ' + e.message + '). Often a browser CORS block or no network.'); }
+  const rem = r.headers.get('x-ratelimit-remaining'), lim = r.headers.get('x-ratelimit-limit');
+  if (rem !== null) lastRate = rem + ' of ' + lim + ' requests left this hour';
+  return { r, ms: Math.round(performance.now() - t0) };
+}
+async function why(r) {
+  let m = '';
+  try { m = (await r.json()).message; } catch (e) {}
+  return 'HTTP ' + r.status + (m ? ' - ' + m : '');
+}
+const base = p => '/repos/' + owner + '/' + repo + '/contents/' + p;
+
+// The sha of a file, found by listing its folder (works for files over 1 MB, unlike asking for the file itself).
+async function shaOf(path) {
+  const { r } = await gh('GET', base(path.split('/').slice(0, -1).join('/')));
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(await why(r));
+  const hit = (await r.json()).find(f => f.path === path);
+  return hit ? hit.sha : null;
+}
+async function put(path, text, msg) {
+  const sha = await shaOf(path);
+  const { r, ms } = await gh('PUT', base(path), { body: { message: msg, content: b64(utf8(text)), ...(sha && { sha }) } });
+  if (!r.ok) throw new Error(await why(r));
+  return { ms, was: sha ? 'replaced' : 'created' };
+}
+async function read(path, ref) {
+  const { r, ms } = await gh('GET', base(path) + (ref ? '?ref=' + ref : ''), { raw: true });
+  if (!r.ok) throw new Error(await why(r));
+  return { text: await r.text(), ms };
+}
+
+async function step(name, fn) {
+  try { const note = await fn(); log('PASS  ' + name + (note ? ' - ' + note : '')); }
+  catch (e) { failed++; log('FAIL  ' + name + ' - ' + e.message); if (e.stop) throw e; }
+}
+const stop = m => Object.assign(new Error(m), { stop: true });
+
+function setup() {
+  lines.length = 0; failed = 0;
+  owner = $('owner').value.trim(); repo = $('repo').value.trim(); token = $('token').value.trim();
+  log('Vault check ' + new Date().toISOString());
+  log('Home Screen app: ' + ((navigator.standalone || matchMedia('(display-mode: standalone)').matches) ? 'yes' : 'NO - open this page from its Home Screen icon for the real test'));
+  log('Browser: ' + navigator.userAgent);
+  log('Online: ' + navigator.onLine);
+  if (!owner || !repo || !token) { log('Fill in the user name, the repository name and the token.'); return false; }
+  if (token.startsWith('ghp_')) { log('STOPPED. That is a classic token, which can reach ALL your repositories. Make a fine-grained token limited to the vault repository.'); return false; }
+  if (!token.startsWith('github_pat_')) { log('STOPPED. That does not look like a fine-grained token (it should start with github_pat_).'); return false; }
+  return true;
+}
+
+async function run() {
+  if (!setup()) return;
+  const small1 = JSON.stringify({ check: 'small', revision: 1, text: 'Xin chào, tôi đang thử kho lưu trữ.' });
+  const small2 = JSON.stringify({ check: 'small', revision: 2, text: 'Xin chào, tôi đang thử kho lưu trữ.' });
+  try {
+    await step('1 Repository reachable and private', async () => {
+      const { r, ms } = await gh('GET', '/repos/' + owner + '/' + repo);
+      if (!r.ok) throw stop(await why(r));
+      const j = await r.json();
+      if (!j.private) throw stop('this repository is PUBLIC. Make it private first. Nothing was written.');
+      return 'private, ' + ms + ' ms';
+    });
+    await step('2 Token reaches only this repository', async () => {
+      const { r } = await gh('GET', '/user/repos?per_page=10');
+      if (!r.ok) return 'could not check (' + r.status + ')';
+      const names = (await r.json()).map(x => x.full_name);
+      if (names.length !== 1) throw new Error('the token can reach ' + names.length + ' repositories (' + names.join(', ') + '). Make a new token limited to the vault only.');
+      return names[0];
+    });
+    await step('3 Read a small file (README.md)', async () => {
+      const { text, ms } = await read('README.md');
+      return text.length + ' characters, ' + ms + ' ms';
+    });
+    await step('4 Write a small file', async () => {
+      const w = await put(SMALL, small1, 'vault check: small file, revision 1');
+      return w.was + ', ' + w.ms + ' ms';
+    });
+    await step('5 Read it back exactly (with Vietnamese letters)', async () => {
+      const { text, ms } = await read(SMALL);
+      if (text !== small1) throw new Error('what came back is not what was written');
+      return 'identical, ' + ms + ' ms';
+    });
+    await step('6 Write a second revision and read it back', async () => {
+      const w = await put(SMALL, small2, 'vault check: small file, revision 2');
+      const { text } = await read(SMALL);
+      if (text !== small2) throw new Error('what came back is not revision 2');
+      return w.was + ', ' + w.ms + ' ms';
+    });
+    await step('7 Earlier version is kept and can be read', async () => {
+      const { r } = await gh('GET', '/repos/' + owner + '/' + repo + '/commits?path=' + SMALL + '&per_page=5');
+      if (!r.ok) throw new Error(await why(r));
+      const list = await r.json();
+      if (list.length < 2) throw new Error('only ' + list.length + ' version found');
+      const { text } = await read(SMALL, list[1].sha);
+      if (text !== small1) throw new Error('the earlier version could not be read back');
+      return list.length + ' versions listed, revision 1 read back from history';
+    });
+    await step('8 Write and read a 1.5 MB file (bigger than one pack bundle)', async () => {
+      const bytes = new Uint8Array(1100000);
+      for (let i = 0; i < bytes.length; i += 65536) crypto.getRandomValues(bytes.subarray(i, Math.min(i + 65536, bytes.length)));
+      const big = b64(bytes);
+      const w = await put(LARGE, big, 'vault check: 1.5 MB file');
+      const { text, ms } = await read(LARGE);
+      if (text !== big) throw new Error('the large file came back different (' + text.length + ' of ' + big.length + ' characters)');
+      return big.length + ' characters; write ' + w.ms + ' ms, read ' + ms + ' ms';
+    });
+    await step('9 Folder listing shows sizes (for "show the size first")', async () => {
+      const { r } = await gh('GET', base(DIR));
+      if (!r.ok) throw new Error(await why(r));
+      return (await r.json()).map(f => f.name + ' ' + f.size + ' bytes').join('; ');
+    });
+    try {
+      await gh('GET', '/repos/' + owner + '/' + repo, { headers: { 'X-GitHub-Api-Version': '2022-11-28' } });
+      log('INFO  X-GitHub-Api-Version header: allowed from the browser');
+    } catch (e) { log('INFO  X-GitHub-Api-Version header: NOT allowed from the browser (so the app must not send it)'); }
+  } catch (e) { if (!e.stop) { failed++; log('FAIL  ' + e.message); } }
+  log('Rate limit: ' + lastRate);
+  log(failed ? 'RESULT: ' + failed + ' step(s) failed.' : 'RESULT: ALL STEPS PASSED. Test files are still in the vault-check folder: tap Delete test files.');
+}
+
+async function del() {
+  lines.length = 0;
+  owner = $('owner').value.trim(); repo = $('repo').value.trim(); token = $('token').value.trim();
+  if (!owner || !repo || !token || !token.startsWith('github_pat_')) { log('Fill in the user name, repository name and token first.'); return; }
+  try {
+    for (const p of [SMALL, LARGE]) {
+      const sha = await shaOf(p);
+      if (!sha) { log(p + ': not there'); continue; }
+      const { r } = await gh('DELETE', base(p), { body: { message: 'vault check: remove ' + p, sha } });
+      log(p + (r.ok ? ': deleted' : ': FAILED ' + await why(r)));
+    }
+    $('token').value = '';
+    log('Done. The token box is cleared.');
+  } catch (e) { log('FAIL  ' + e.message); }
+}
+
+function busy(on) { for (const id of ['run', 'del']) $(id).disabled = on; }
+$('run').addEventListener('click', async () => { busy(true); try { await run(); } finally { busy(false); } });
+$('del').addEventListener('click', async () => { busy(true); try { await del(); } finally { busy(false); } });
+$('copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('log').value); log('(log copied)'); }
+  catch (e) { $('log').focus(); $('log').select(); }
+});
+</script>
+</body>
+</html>
