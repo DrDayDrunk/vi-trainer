@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 
 let ready = true;
 try { await import('fake-indexeddb/auto'); } catch { ready = false; }
-const { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck, replaceDeck, loadSettings, saveSettings } = await import('../store.js');
+const { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck, replaceDeck, loadSettings, saveSettings, mergeInto, restoreDeck, loadToken, saveToken, loadSync, saveSync } = await import('../store.js');
 const { realDeck, E } = await import('./helpers.js');
 const opts = { skip: !ready && 'fake-indexeddb not installed' };
-const S = o => ({ backupDays: 7, lastBackup: null, newPerDay: 10, retention: 0.9, startAt: null, ...o });   // every setting, with defaults
+const S = o => ({ backupDays: 7, lastBackup: null, newPerDay: 10, retention: 0.9, startAt: null, settingsAt: null, ...o });   // every setting, with defaults
 
 const gone = () => new Promise(ok => { const r = indexedDB.deleteDatabase('vitrainer'); r.onsuccess = r.onerror = r.onblocked = ok; });
 const sentence = n => ({ number: n, level: 1, track: 1, en_text: 'e' + n, vi_text: 'v' + n, en_audio: new ArrayBuffer(8), vi_audio: new ArrayBuffer(8) });
@@ -195,5 +195,116 @@ test('today\'s record (introduced sentences, learn more) is saved with the grade
   const back = await loadDeck(db);
   assert.deepEqual(back, d);
   assert.deepEqual(back.today.intro, [1]); assert.equal(back.today.extra, 5);
+  db.close();
+});
+
+// ---- vault sync (ticket 10): merging the vault's progress into the phone, and the vault token
+
+const T = new Date(Date.UTC(2026, 10, 12, 8));
+const later = c => ({ ...c, last_review: '2026-11-20T10:00:00.000Z', reps: c.reps + 1 });
+const synced = (cards, o = {}) => ({ cards, settings: { backupDays: 7, newPerDay: 10, retention: 0.9, startAt: null }, settingsAt: null, ...o });
+
+test('a merge writes the merged cards and settings, keeping today\'s record and the backup date', opts, async () => {
+  await gone(); const db = await openDb();
+  const mine = realDeck(), today = { day: '2026-11-13T04:00:00.000Z', intro: [9], extra: 5 };
+  await seed(db, { ...mine, today });
+  await saveSettings(db, S({ lastBackup: NOW.toISOString() }));
+  const vault = { 7: mine.cards[1], ...mine.cards };
+  const changed = await mergeInto(db, synced(vault, { settings: { backupDays: 14, newPerDay: 20, retention: 0.95, startAt: 5 }, settingsAt: '2026-11-11T10:00:00.000Z' }), T);
+  assert.equal(changed, 1);                                     // only card 7 is new
+  const d = await loadDeck(db);
+  assert.deepEqual(d.cards, vault); assert.deepEqual(d.today, today);
+  assert.deepEqual(await loadSettings(db), S({ lastBackup: NOW.toISOString(), backupDays: 14, newPerDay: 20, retention: 0.95, startAt: 5, settingsAt: '2026-11-11T10:00:00.000Z' }));
+  db.close();
+});
+
+test('a wiped phone takes everything the vault has', opts, async () => {
+  await gone(); const db = await openDb();
+  const vault = realDeck().cards;
+  assert.equal(await mergeInto(db, synced(vault), T), Object.keys(vault).length);
+  assert.deepEqual(await loadDeck(db), { cards: vault, last: null });
+  db.close();
+});
+
+test('if a grade was saved while the sync was running, the merge is refused with a retry and nothing changes', opts, async () => {
+  await gone(); const db = await openDb();
+  const mine = realDeck(); await seed(db, mine);
+  const stale = { ...mine.cards, 2: mine.cards[2] };            // the sync read the phone before card 2 was graded again
+  await seed(db, { ...mine, cards: { ...mine.cards, 2: later(mine.cards[2]) } });
+  const before = await loadDeck(db);
+  await assert.rejects(mergeInto(db, synced(stale), T), e => e.retry === true);
+  assert.deepEqual(await loadDeck(db), before);
+  db.close();
+});
+
+test('a merge that lacks a card the phone has is refused', opts, async () => {
+  await gone(); const db = await openDb();
+  const mine = realDeck(); await seed(db, mine);
+  const { 1: dropped, ...rest } = mine.cards;
+  await assert.rejects(mergeInto(db, synced(rest), T), e => e.retry === true);
+  assert.deepEqual(await loadDeck(db), mine);
+  db.close();
+});
+
+test('a merge never replaces progress that cannot be read', opts, async () => {
+  await gone(); const db = await openDb();
+  await new Promise(ok => { const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put('garbage', 'deck'); tx.oncomplete = ok; });
+  await assert.rejects(mergeInto(db, synced(realDeck().cards), T), /could not be read/);
+  await assert.rejects(loadDeck(db), /could not be read/);
+  db.close();
+});
+
+test('undo information is kept when its card did not change and dropped when the merge replaced that card', opts, async () => {
+  await gone(); const db = await openDb();
+  const mine = realDeck(), last = { n: 3, prev: null };
+  await seed(db, { ...mine, last });
+  await mergeInto(db, synced({ ...mine.cards, 4: later(mine.cards[4]) }), T);
+  assert.deepEqual((await loadDeck(db)).last, last);
+  await mergeInto(db, synced({ ...mine.cards, 4: later(mine.cards[4]), 3: later(mine.cards[3]) }), T);
+  assert.equal((await loadDeck(db)).last, null);
+  db.close();
+});
+
+test('restoring an earlier version replaces the cards on purpose, keeps today\'s record and drops undo', opts, async () => {
+  await gone(); const db = await openDb();
+  const mine = realDeck(), today = { day: 'd', intro: [], extra: 0 };
+  await seed(db, { cards: Object.fromEntries(Object.entries(mine.cards).map(([k, c]) => [k, later(c)])), last: { n: 1, prev: null }, today });
+  await restoreDeck(db, mine.cards, { backupDays: 3, newPerDay: 5, retention: 0.8, startAt: null }, '2026-11-01T10:00:00.000Z');
+  assert.deepEqual(await loadDeck(db), { cards: mine.cards, last: null, today });
+  assert.deepEqual(await loadSettings(db), S({ backupDays: 3, newPerDay: 5, retention: 0.8, settingsAt: '2026-11-01T10:00:00.000Z' }));
+  db.close();
+});
+
+test('restoring never accepts an empty set of cards or replaces progress that cannot be read', opts, async () => {
+  await gone(); const db = await openDb();
+  const mine = realDeck(); await seed(db, mine);
+  await assert.rejects(restoreDeck(db, {}, S(), null), /no cards/);
+  assert.deepEqual(await loadDeck(db), mine);
+  await new Promise(ok => { const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put('garbage', 'deck'); tx.oncomplete = ok; });
+  await assert.rejects(restoreDeck(db, mine.cards, S(), null), /could not be read/);
+  db.close();
+});
+
+test('the vault token and the last sync are kept on this phone and are in no backup', opts, async () => {
+  await gone(); const db = await openDb();
+  assert.equal(await loadToken(db), null); assert.equal(await loadSync(db), null);
+  await saveToken(db, 'github_pat_SECRETSECRET');
+  await saveSync(db, { lastSync: T.toISOString(), revision: 4 });
+  assert.equal(await loadToken(db), 'github_pat_SECRETSECRET');
+  assert.deepEqual(await loadSync(db), { lastSync: T.toISOString(), revision: 4 });
+  const { makeBackup } = await import('../backup.js'), { makeProgress } = await import('../sync.js');
+  const deck = realDeck(), settings = await loadSettings(db);
+  assert.doesNotMatch(JSON.stringify(makeBackup(deck, 7, T, {})), /SECRET/);
+  assert.doesNotMatch(JSON.stringify(makeProgress({ cards: deck.cards, settings, settingsAt: null, revision: 1 }, T)), /SECRET/);
+  assert.doesNotMatch(JSON.stringify(settings), /SECRET/);
+  await saveToken(db, null);
+  assert.equal(await loadToken(db), null);
+  db.close();
+});
+
+test('a token that is not text is ignored, not trusted', opts, async () => {
+  await gone(); const db = await openDb();
+  await new Promise(ok => { const tx = db.transaction('meta', 'readwrite'); tx.objectStore('meta').put({ token: 5 }, 'vault'); tx.oncomplete = ok; });
+  assert.equal(await loadToken(db), null);
   db.close();
 });

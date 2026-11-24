@@ -143,9 +143,14 @@ test('every good daily limit and retention choice is accepted', () => {
 });
 
 test('settings are cleaned one by one: good values kept, anything else replaced by the default', () => {
-  assert.deepEqual(cleanSettings(undefined), { ...DEFAULTS, lastBackup: null });
+  assert.deepEqual(cleanSettings(undefined), { ...DEFAULTS, lastBackup: null, settingsAt: null });
   assert.deepEqual(cleanSettings({ backupDays: 14, lastBackup: 'x', newPerDay: 15, retention: 0.95, startAt: 100 }),
-    { backupDays: 14, lastBackup: 'x', newPerDay: 15, retention: 0.95, startAt: 100 });
-  assert.deepEqual(cleanSettings({ backupDays: 5, newPerDay: 99, retention: 2, startAt: 'a' }), { ...DEFAULTS, lastBackup: null });
+    { backupDays: 14, lastBackup: 'x', newPerDay: 15, retention: 0.95, startAt: 100, settingsAt: null });
+  assert.deepEqual(cleanSettings({ backupDays: 5, newPerDay: 99, retention: 2, startAt: 'a', settingsAt: 'yesterday' }), { ...DEFAULTS, lastBackup: null, settingsAt: null });
   assert.deepEqual(DEFAULTS, { backupDays: 7, newPerDay: 10, retention: 0.9, startAt: null });
+});
+
+test('the time of the last settings edit is kept when valid and forgotten when not', () => {
+  assert.equal(cleanSettings({ settingsAt: '2026-11-12T08:00:00.000Z' }).settingsAt, '2026-11-12T08:00:00.000Z');
+  for (const bad of ['yesterday', 5, {}, undefined]) assert.equal(cleanSettings({ settingsAt: bad }).settingsAt, null);
 });
