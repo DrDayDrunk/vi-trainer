@@ -9,7 +9,7 @@ export const RETENTION_CHOICES = [0.8, 0.85, 0.9, 0.95];
 export const DEFAULTS = { backupDays: DEFAULT_DAYS, newPerDay: 10, retention: 0.9, startAt: null };   // startAt null = never set
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
-const isDate = v => typeof v === 'string' && ISO.test(v) && !isNaN(Date.parse(v));
+export const isDate = v => typeof v === 'string' && ISO.test(v) && !isNaN(Date.parse(v));
 const isNum = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const isInt = v => Number.isInteger(v) && v >= 0;
 const plain = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -22,7 +22,7 @@ const no = why => { throw new Error(why + ' Nothing was changed.'); };
 // Settings are not progress: any value that is missing or not one of the allowed choices becomes its default.
 export function cleanSettings(s) {
   const o = plain(s) ? s : {};
-  const out = { lastBackup: o.lastBackup || null };
+  const out = { lastBackup: o.lastBackup || null, settingsAt: isDate(o.settingsAt) ? o.settingsAt : null };   // settingsAt: when a synced setting was last edited here
   for (const k of Object.keys(DEFAULTS)) out[k] = goodSetting[k](o[k]) ? o[k] : DEFAULTS[k];
   return out;
 }

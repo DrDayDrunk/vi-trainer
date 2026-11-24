@@ -40,10 +40,13 @@
     <button id="to-hf" class="quiet" disabled>Hands-free session</button>
     <button id="pick" class="quiet">Import sentences</button>
     <button id="to-backup" class="quiet">Backup</button>
+    <button id="to-vault" class="quiet">Vault</button>
     <button id="to-settings" class="quiet">Settings</button>
     <input id="file" type="file" accept=".json,application/json" hidden>
     <p id="msg" role="status" aria-live="polite"></p>
+    <p id="sync-line" class="muted" role="status" aria-live="polite"></p>
   </section>
+  <p id="ver" class="muted"></p>
 </main>
 
 <main id="settings" hidden>
@@ -153,6 +156,83 @@
     <p id="hf-skip" class="muted"></p>
     <button id="hf-save" class="main">Save to Files</button>
     <p id="hf-msg2" role="status" aria-live="polite"></p>
+  </section>
+</main>
+
+<main id="vault" hidden>
+  <div class="top">
+    <button id="vt-back" class="quiet"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Home</button>
+  </div>
+  <h1>Vault</h1>
+  <p class="muted">Your private online copy of your sentences and progress, in your own GitHub account. It is for recovery and a second device. Studying and sessions never need it.</p>
+
+  <section class="card" aria-labelledby="h-vt-conn">
+    <h2 id="h-vt-conn">Connection</h2>
+    <p id="vt-state" class="muted"></p>
+    <div id="vt-token-box">
+      <label for="vt-token">Vault token (starts with github_pat_)</label>
+      <input id="vt-token" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="vt-connect" class="main">Save token and connect</button>
+    </div>
+    <button id="vt-forget" class="quiet" hidden>Remove token from this phone</button>
+    <p class="muted">The token stays on this phone only. It is in no backup and is never synced. To cancel it for good, open github.com/settings/personal-access-tokens in Safari, choose vi-vault-phone, then Delete.</p>
+    <p id="vt-msg0" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-vt-sync">
+    <h2 id="h-vt-sync">Progress</h2>
+    <p id="vt-sync-info" class="muted"></p>
+    <button id="vt-sync" class="main" disabled>Sync now</button>
+    <p id="vt-msg1" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="vt-ask" class="card" aria-labelledby="h-vt-ask" hidden>
+    <h2 id="h-vt-ask">Which do you want to keep?</h2>
+    <p id="vt-ask-text"></p>
+    <div class="row">
+      <button id="vt-keep-phone" class="main">Keep this phone's</button>
+      <button id="vt-keep-vault" class="main">Keep the vault's</button>
+    </div>
+    <button id="vt-ask-no" class="quiet">Decide later</button>
+  </section>
+
+  <section class="card" aria-labelledby="h-vt-packs">
+    <h2 id="h-vt-packs">Sentences</h2>
+    <p id="vt-packs-info" class="muted">Tap Check the vault to see what is there and how big it is.</p>
+    <button id="vt-check" class="quiet" disabled>Check the vault</button>
+    <div id="vt-levels" hidden>
+      <button id="vt-d1" class="quiet"></button>
+      <button id="vt-d2" class="quiet"></button>
+      <button id="vt-d3" class="quiet"></button>
+      <label for="vt-one">Or one file at a time</label>
+      <select id="vt-one"></select>
+      <button id="vt-d-one" class="quiet">Download this file</button>
+    </div>
+    <p id="vt-prog" class="muted" role="status" aria-live="polite"></p>
+    <p id="vt-msg2" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-vt-ver">
+    <h2 id="h-vt-ver">Earlier versions</h2>
+    <p class="muted">Every sync keeps the version before it. If a sync went wrong you can go back to one. Your current progress is saved to the vault first, so you can go forward again the same way. If you use two devices, restore on both.</p>
+    <button id="vt-ver-show" class="quiet" disabled>Show earlier versions</button>
+    <div id="vt-ver-box" hidden>
+      <label for="vt-ver">Version, newest first</label>
+      <select id="vt-ver"></select>
+      <button id="vt-ver-look" class="quiet">Look at this version</button>
+    </div>
+    <p id="vt-msg3" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="vt-rest" class="card" aria-labelledby="h-vt-rest" hidden>
+    <h2 id="h-vt-rest">Go back to this version?</h2>
+    <p id="vt-rest-v"></p>
+    <p id="vt-rest-p"></p>
+    <p class="muted">This replaces the progress on this phone and in the vault with that version. The current progress is saved to the vault history first.</p>
+    <div class="row">
+      <button id="vt-rest-yes" class="main">Restore this version</button>
+      <button id="vt-rest-no" class="quiet">Cancel</button>
+    </div>
   </section>
 </main>
 

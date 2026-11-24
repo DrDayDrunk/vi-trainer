@@ -51,8 +51,8 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 #backup label{display:block;margin-bottom:.5rem}
 #bk-confirm .row{margin:.5rem 0 0}
 #nudge p{margin:0 0 .75rem}
-select,input[type=number]{font:inherit;width:100%;min-height:48px;padding:0 .75rem;border-radius:12px;border:1px solid var(--edge);background:var(--card);color:var(--fg)}
-select:focus-visible,input[type=number]:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+select,input[type=number],input[type=password]{font:inherit;width:100%;min-height:48px;padding:0 .75rem;border-radius:12px;border:1px solid var(--edge);background:var(--card);color:var(--fg)}
+select:focus-visible,input[type=number]:focus-visible,input[type=password]:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 #along{display:flex;flex-direction:column;min-height:calc(100dvh - 2.5rem)}
 #along .card{margin-bottom:.75rem}
 #a-vi{font-size:clamp(1.75rem,7vw,2.5rem);font-weight:600;line-height:1.35;margin:.25rem 0 .5rem}
@@ -82,3 +82,16 @@ select:focus-visible,input[type=number]:focus-visible{outline:2px solid var(--pr
 #hf .card h2+p{margin-top:0;font-size:1rem}
 #hf-msg,#hf-msg2{min-height:1.5rem}
 #hf-msg.error,#hf-msg2.error{color:var(--error)}
+
+#vault .top{justify-content:flex-start}
+#vault>p{margin:0 0 1rem}
+#vault .card p{margin:.5rem 0 .75rem;font-size:.875rem}
+#vault .card h2+p{margin-top:0}
+#vault label{display:block;margin:.75rem 0 .25rem;font-size:.875rem;color:var(--muted)}
+#vault .card button{width:100%;margin-top:.5rem}
+#vault .card .row button{margin-top:0}
+#vault .card .row{margin:.5rem 0 0}
+#vault .card button.main:first-of-type{margin-top:.75rem}
+#vt-msg0,#vt-msg1,#vt-msg2,#vt-msg3,#vt-prog{min-height:1.25rem}
+#vt-msg0.error,#vt-msg1.error,#vt-msg2.error,#vt-msg3.error{color:var(--error)}
+#ver,#sync-line{font-size:.875rem;margin:.75rem 0 0;text-align:center}

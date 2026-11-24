@@ -1,8 +1,12 @@
 import { createEngine, MORE } from './engine.js';
 import { validatePack } from './pack.js';
-import { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck, replaceDeck, loadSettings, saveSettings } from './store.js';
+import { openDb, savePack, getSentence, allNumbers, loadDeck, saveDeck, replaceDeck, loadSettings, saveSettings, loadToken, saveToken, loadSync } from './store.js';
 import { mix, cost, planSession, render as stitch, toInt16, nextDay, cleanPrefs, sessionName, RATE } from './session.js';
 import { makeBackup, backupName, readBackup, newest, refusal, reminder } from './backup.js';
+import { createVault, VaultError } from './vault.js';
+import { syncNow, downloadPacks, versions, previewVersion, restoreVersion, edited, stamp } from './vaultsync.js';
+
+const APP_VERSION = 7;                                  // keep in step with CACHE in sw.js (a test checks); shown on Home so you can tell which copy is running
 
 const $ = id => document.getElementById(id);
 const player = new Audio();
@@ -20,7 +24,8 @@ const when = iso => new Date(iso).toLocaleString([], { day: 'numeric', month: 's
 
 // ---------------------------------------------------------------- home
 
-function showHome() {
+// Fills Home in without switching screens, so a sync that finishes in the background can refresh it wherever you are.
+function fillHome() {
   const now = new Date(), c = E.counts(deck, numbers, now, cfg()), nx = E.next(deck, numbers, now, cfg()), p = E.plan(deck, numbers, now, cfg());
   $('c-new').textContent = c.new; $('c-learning').textContent = c.learning; $('c-review').textContent = c.review;
   $('status').textContent = numbers.length
@@ -39,7 +44,13 @@ function showHome() {
   $('to-along').disabled = !al.length;
   $('to-along').textContent = al.length || !numbers.length ? 'Read along' : 'Read along (no new sentences today)';
   $('to-hf').disabled = !numbers.length;
-  $('review').hidden = $('backup').hidden = $('along').hidden = $('settings').hidden = $('hf').hidden = true; $('home').hidden = false;
+  $('sync-line').textContent = !vault ? 'Vault: not set up. Open Vault to connect.' : syncNote || (syncInfo ? 'Vault: last synced ' + when(syncInfo.lastSync) + '.' : 'Vault: connected, not synced yet.');
+  $('ver').textContent = 'App version ' + APP_VERSION;
+}
+
+function showHome() {
+  fillHome();
+  $('review').hidden = $('backup').hidden = $('along').hidden = $('settings').hidden = $('hf').hidden = $('vault').hidden = true; $('home').hidden = false;
 }
 
 async function refresh() { numbers = await allNumbers(db); showHome(); }
@@ -95,7 +106,7 @@ async function change(fn, forced) {
   if (busy) return;
   busy = true; $('undo').disabled = true;
   try {
-    const next = fn(); await saveDeck(db, next); deck = next;
+    const next = fn(); await saveDeck(db, next); deck = next; graded = true;
     try { await showCard(forced && forced()); }
     catch { say($('rmsg'), 'Your grade was saved, but the next card could not be shown. Go back to Home and start again.', true); }
   } catch { say($('rmsg'), 'That could not be saved, so it was not counted. Try again.', true); }
@@ -173,7 +184,7 @@ $('bk-yes').onclick = () => { $('bk-confirm').hidden = true; if (pending) restor
 $('bk-no').onclick = () => { pending = null; $('bk-confirm').hidden = true; say($('bk-msg2'), 'Cancelled. Nothing was changed.'); };
 $('bk-days').onchange = async e => {
   const before = settings;
-  settings = { ...settings, backupDays: +e.target.value };
+  settings = edited(settings, { backupDays: +e.target.value }, new Date());
   try { await saveSettings(db, settings); } catch { settings = before; e.target.value = before.backupDays; say($('bk-msg1'), 'The reminder setting could not be saved.', true); }
 };
 
@@ -200,7 +211,7 @@ $('file').onchange = async e => {
   catch (err) { say($('msg'), /Nothing was changed/.test(err.message) ? err.message : 'Something went wrong. Nothing was changed.', true); }
 };
 $('study').onclick = async () => { $('home').hidden = true; $('review').hidden = false; await showCard(); };
-$('back').onclick = () => { player.pause(); showHome(); };
+$('back').onclick = () => { player.pause(); showHome(); if (graded) { graded = false; autoSync(); } };
 $('reveal').onclick = reveal;
 $('pe').onclick = () => play('en');
 $('pv').onclick = () => play('vi');
@@ -230,7 +241,7 @@ function showSettings() {
 
 // Settings are not progress, but a failed save still says so and puts the old value back.
 async function saveSetting(patch, done, undoField) {
-  const next = { ...settings, ...patch };
+  const next = edited(settings, patch, new Date());
   try { await saveSettings(db, next); useSettings(next); say($('st-msg'), done); }
   catch { undoField(); say($('st-msg'), 'That could not be saved. Nothing was changed.', true); }
 }
@@ -391,9 +402,156 @@ $('hf-today').onclick = () => hfBuild(false);
 $('hf-tomorrow').onclick = () => hfBuild(true);
 // ---------------------------------------------------------------- end of hands-free
 
+// ---------------------------------------------------------------- vault (ticket 10)
+// The vault is the only part of the app that uses the network. Nothing in this section writes cards or sentences itself:
+// progress changes only through syncNow and restoreVersion, sentences only through downloadPacks (a test checks this).
+let vault = null, vfiles = [], vlist = [], syncing = false, downloading = false, graded = false, syncInfo = null, syncNote = '', asking = null, pendingRestore = null;
+const MB = b => (b / 1048576).toFixed(1) + ' MB';
+const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+const vmsg = (el, e) => say(el, e instanceof VaultError || /Nothing was changed/.test(e.message) ? e.message : 'Something went wrong. Nothing was changed.', true);
+
+function showAsk() {
+  $('vt-ask').hidden = !asking;
+  if (!asking) return;
+  const cards = asking.filter(q => q.kind === 'card').map(q => q.number), sets = asking.some(q => q.kind === 'settings');
+  $('vt-ask-text').textContent = (cards.length ? 'For ' + plural(cards.length, 'sentence') + ' (' + cards.slice(0, 5).join(', ') + (cards.length > 5 ? ', ...' : '') + ') this phone and the vault hold different results for the same review. ' : '')
+    + (sets ? 'Your settings differ and neither is newer. ' : '') + 'Nothing has been changed. Choose which side to keep for these.';
+}
+
+function showVault() {
+  $('vt-state').textContent = vault ? 'Connected to your private vault.' : 'Not connected. Paste the vault token below.';
+  $('vt-token-box').hidden = !!vault; $('vt-forget').hidden = !vault;
+  $('vt-sync').disabled = !vault || syncing; $('vt-check').disabled = $('vt-ver-show').disabled = !vault;
+  $('vt-sync-info').textContent = !vault ? 'Connect first.' : (syncInfo ? 'Last synced ' + when(syncInfo.lastSync) + '. Vault revision ' + syncInfo.revision + '. ' : 'Not synced yet. ') + 'This phone has ' + plural(count(deck.cards), 'card') + '.';
+  showAsk();
+  $('home').hidden = true; $('vault').hidden = false;
+}
+
+async function reloadAfterSync() {
+  deck = await loadDeck(db); useSettings(await loadSettings(db)); syncInfo = await loadSync(db); numbers = await allNumbers(db);
+  fillHome(); if (!$('vault').hidden) showVault();
+}
+
+const syncText = r => r.ahead === 'same' ? 'Already in sync.'
+  : r.ahead === 'phone' ? 'Synced. Your changes were sent to the vault.'
+  : r.ahead === 'vault' ? 'Synced. ' + (r.changed ? plural(r.changed, 'card') + ' updated from the vault.' : 'Settings updated from the vault.')
+  : 'Synced both ways. ' + (r.changed ? plural(r.changed, 'card') + ' updated from the vault, and ' : '') + 'your changes were sent.';
+
+// quiet = started by the app (on opening, or after a study session): it never blocks studying and only speaks if something happened.
+async function doSync(prefer = null, quiet = false) {
+  if (syncing || !vault) return;
+  if (navigator.onLine === false) { if (!quiet) say($('vt-msg1'), 'This phone is offline. Studying works offline. Sync when you are back online.', true); return; }
+  syncing = true; $('vt-sync').disabled = true;
+  if (!quiet) say($('vt-msg1'), 'Syncing...');
+  try {
+    const r = await syncNow(db, vault, new Date(), prefer);
+    if (r.ask) { asking = r.ask; syncNote = 'Vault: sync needs your decision. Open Vault.'; say($('vt-msg1'), 'This phone and the vault disagree. Nothing was changed. Choose below.', true); }
+    else {
+      asking = null; syncNote = ''; await reloadAfterSync();
+      say($('vt-msg1'), syncText(r)); if (quiet && r.pulled) say($('msg'), syncText(r));
+    }
+  } catch (e) { syncNote = 'Vault: the last sync did not finish. Studying works offline.'; vmsg($('vt-msg1'), e); }
+  finally { syncing = false; $('vt-sync').disabled = !vault; fillHome(); showAsk(); }
+}
+const autoSync = () => doSync(null, true);
+
+$('to-vault').onclick = showVault;
+$('vt-back').onclick = showHome;
+$('vt-sync').onclick = () => doSync();
+$('vt-keep-phone').onclick = () => { asking = null; showAsk(); doSync('phone'); };
+$('vt-keep-vault').onclick = () => { asking = null; showAsk(); doSync('vault'); };
+$('vt-ask-no').onclick = () => { asking = null; showAsk(); say($('vt-msg1'), 'Nothing was changed. Sync again when you want to decide.'); };
+
+$('vt-connect').onclick = async () => {
+  const t = $('vt-token').value.trim(), out = $('vt-msg0');
+  if (t.startsWith('ghp_')) return say(out, 'That is a classic token, which can reach all your repositories. Make a fine-grained token for the vault only. Nothing was saved.', true);
+  if (!t.startsWith('github_pat_') || t.length < 40 || /\s/.test(t)) return say(out, 'That does not look like the vault token (one line that starts with github_pat_). Nothing was saved.', true);
+  say(out, 'Checking...');
+  try { await createVault(t).check(); await saveToken(db, t); } catch (e) { return vmsg(out, e); }
+  $('vt-token').value = ''; vault = createVault(t); showVault(); fillHome(); say(out, 'Connected.'); doSync();
+};
+$('vt-forget').onclick = async () => {
+  try { await saveToken(db, null); } catch { return say($('vt-msg0'), 'The token could not be removed. Nothing was changed.', true); }
+  vault = null; vfiles = []; vlist = []; asking = null; syncNote = ''; pendingRestore = null; $('vt-levels').hidden = $('vt-ver-box').hidden = $('vt-rest').hidden = true;
+  showVault(); fillHome(); say($('vt-msg0'), 'The token was removed from this phone.');
+};
+
+// ---- sentences
+const onPhone = f => { const b = (f.level - 1) * 1000 + (f.track - 1) * 50, have = new Set(numbers); for (let i = 1; i <= 50; i++) if (!have.has(b + i)) return false; return true; };
+function renderPacks() {
+  $('vt-levels').hidden = !vfiles.length;
+  for (const lv of [1, 2, 3]) {
+    const fs = vfiles.filter(f => f.level === lv), here = fs.filter(onPhone).length, b = $('vt-d' + lv);
+    b.hidden = !fs.length;
+    b.textContent = 'Download Fluency ' + lv + ' (' + plural(fs.length, 'file') + ', ' + MB(fs.reduce((s, f) => s + f.size, 0)) + (here ? ', ' + here + ' already here' : '') + ')';
+  }
+  $('vt-one').replaceChildren(...vfiles.map(f => { const o = document.createElement('option'); o.value = f.name; o.textContent = 'Fluency ' + f.level + ', track ' + f.track + ' (' + MB(f.size) + (onPhone(f) ? ', on this phone' : '') + ')'; return o; }));
+  $('vt-packs-info').textContent = plural(vfiles.length, 'file') + ' in the vault, ' + MB(vfiles.reduce((s, f) => s + f.size, 0)) + ' in all. Sentences on this phone: ' + numbers.length + '.';
+}
+$('vt-check').onclick = async () => {
+  const out = $('vt-msg2'); say(out, 'Checking the vault...');
+  try { vfiles = await vault.listPack(); } catch (e) { return vmsg(out, e); }
+  renderPacks(); say(out, vfiles.length ? '' : 'The vault has no sentence files yet. Upload them from your Mac first (see the Vault guide).');
+};
+async function download(files) {
+  if (!files.length || downloading) return;
+  downloading = true; const out = $('vt-msg2'), buttons = [...document.querySelectorAll('#vt-levels button')];
+  buttons.forEach(b => { b.disabled = true; }); say(out, '');
+  try {
+    const r = await downloadPacks(db, vault, files, (i, n, name) => { $('vt-prog').textContent = 'Downloading ' + i + ' of ' + n + ': ' + name; });
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+    numbers = await allNumbers(db); fillHome(); renderPacks();
+    const bad = r.failed.length;
+    say(out, 'Downloaded ' + r.done.length + ' of ' + files.length + ' files. Sentences on this phone: ' + numbers.length + '.'
+      + (bad ? ' Not stored: ' + r.failed.slice(0, 4).map(f => f.name + ' (' + f.why.replace(' Nothing was changed.', '') + ')').join('; ') + (bad > 4 ? '; and ' + (bad - 4) + ' more' : '') + '.' : ''), !!bad);
+    if (r.stopped) say(out, out.textContent + ' ' + r.stopped.message, true);
+  } catch (e) { vmsg(out, e); }
+  finally { $('vt-prog').textContent = ''; buttons.forEach(b => { b.disabled = false; }); downloading = false; }
+}
+for (const lv of [1, 2, 3]) $('vt-d' + lv).onclick = () => download(vfiles.filter(f => f.level === lv));
+$('vt-d-one').onclick = () => download(vfiles.filter(f => f.name === $('vt-one').value));
+
+// ---- earlier versions
+$('vt-ver-show').onclick = async () => {
+  const out = $('vt-msg3'); say(out, 'Loading...'); $('vt-rest').hidden = true; pendingRestore = null;
+  try { vlist = await versions(vault); } catch (e) { return vmsg(out, e); }
+  $('vt-ver').replaceChildren(...vlist.map((v, i) => { const o = document.createElement('option'); o.textContent = when(v.date) + (i === 0 ? ' (latest)' : ''); return o; }));
+  $('vt-ver-box').hidden = !vlist.length; say(out, vlist.length ? '' : 'There are no earlier versions yet.');
+};
+$('vt-ver-look').onclick = async () => {
+  const out = $('vt-msg3'), v = vlist[$('vt-ver').selectedIndex]; if (!v) return;
+  say(out, 'Loading...'); pendingRestore = null; $('vt-rest').hidden = true;
+  try {
+    const p = await previewVersion(vault, v.sha);
+    pendingRestore = v; say(out, '');
+    $('vt-rest-v').textContent = 'That version: ' + plural(p.count, 'card') + ', newest review ' + (p.newest ? when(p.newest) : 'none') + ', vault revision ' + p.revision + '.';
+    $('vt-rest-p').textContent = 'This phone: ' + plural(count(deck.cards), 'card') + ', newest review ' + (newest(deck.cards) ? when(newest(deck.cards)) : 'none') + '.';
+    $('vt-rest').hidden = false;
+  } catch (e) { vmsg(out, e); }
+};
+$('vt-rest-no').onclick = () => { pendingRestore = null; $('vt-rest').hidden = true; say($('vt-msg3'), 'Cancelled. Nothing was changed.'); };
+$('vt-rest-yes').onclick = async () => {
+  if (!pendingRestore || syncing) return;
+  const v = pendingRestore, out = $('vt-msg3'); pendingRestore = null; $('vt-rest').hidden = true; syncing = true; say(out, 'Restoring...');
+  try {
+    const r = await restoreVersion(db, vault, v.sha, new Date());
+    asking = null; syncNote = ''; await reloadAfterSync();
+    say(out, 'Restored: ' + plural(r.count, 'card') + ', vault revision ' + r.revision + '. The progress from before is still in the vault history.');
+  } catch (e) { vmsg(out, e); }
+  finally { syncing = false; $('vt-sync').disabled = !vault; fillHome(); }
+};
+// ---------------------------------------------------------------- end of vault
+
 (async () => {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
-  try { db = await openDb(); deck = await loadDeck(db); useSettings(await loadSettings(db)); await refresh(); }
+  try {
+    db = await openDb(); deck = await loadDeck(db);
+    const s0 = await loadSettings(db), s1 = stamp(s0, new Date());       // settings changed before sync existed get their time once
+    if (s1 !== s0) { try { await saveSettings(db, s1); } catch { /* tried again next time */ } }
+    useSettings(s1); syncInfo = await loadSync(db).catch(() => null);
+    const token = await loadToken(db).catch(() => null); vault = token ? createVault(token) : null;
+    await refresh(); autoSync();
+  }
   catch (err) {
     // If progress cannot be read the app stops, so it can never start from empty and save over it.
     $('status').textContent = ''; $('study').disabled = $('pick').disabled = $('to-backup').disabled = $('to-settings').disabled = true;
